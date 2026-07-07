@@ -19,6 +19,7 @@ function parseCreated(s) {
   return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 10) : d.toISOString().slice(0, 10);
 }
 const SYM = { USD: "$", GBP: "£", EUR: "€" };
+const TODAY = new Date().toISOString().slice(0, 10);
 
 function toClient(row) {
   const [primary, ...rest] = emails(row.Email);
@@ -41,7 +42,11 @@ function toClient(row) {
     billingDay: 1,
     cadence: "monthly",
     currency: SYM[cur] ? cur : "USD",
-    lastPaid: "",
+    // The CSV has no recurring amount or payment history, so the CRM's
+    // periodsBehind() math would treat every client as maximally overdue.
+    // Anchor lastPaid to today so nothing shows false arrears — the real
+    // billing state comes from ChargeOver's status (billingStatus) + balance.
+    lastPaid: TODAY,
     payments: [],
     emailStatus: "ok",
     secondaryContacts: rest.map((e) => ({ name: "", email: e, role: "" })),

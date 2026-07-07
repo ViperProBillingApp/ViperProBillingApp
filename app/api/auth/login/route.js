@@ -8,11 +8,13 @@ export async function POST(req) {
   if (!email || !password) {
     return NextResponse.json({ error: "Email and password are required." }, { status: 400 });
   }
-  const user = getDb().prepare("SELECT * FROM users WHERE email = ?").get(String(email).trim());
+  const db = await getDb();
+  const { rows } = await db.query("SELECT * FROM users WHERE LOWER(email) = LOWER($1)", [String(email).trim()]);
+  const user = rows[0];
   if (!user || !user.active || !verifyPassword(String(password), user.hash)) {
     return NextResponse.json({ error: "Incorrect email or password." }, { status: 401 });
   }
-  const token = createSession(user.id);
+  const token = await createSession(user.id);
   const res = NextResponse.json({ ok: true });
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,

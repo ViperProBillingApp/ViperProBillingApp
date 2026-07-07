@@ -12,10 +12,11 @@ async function requireAdmin() {
 export async function GET() {
   const [, err] = await requireAdmin();
   if (err) return err;
-  const users = getDb()
-    .prepare("SELECT id, email, name, role, active, created_at FROM users ORDER BY created_at")
-    .all();
-  return NextResponse.json({ users });
+  const db = await getDb();
+  const { rows } = await db.query(
+    "SELECT id, email, name, role, active, created_at FROM users ORDER BY created_at"
+  );
+  return NextResponse.json({ users: rows });
 }
 
 export async function POST(req) {
@@ -31,17 +32,19 @@ export async function POST(req) {
   if (password.length < 8) {
     return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
   }
+  const db = await getDb();
   try {
-    const result = getDb()
-      .prepare("INSERT INTO users (email, name, hash, role) VALUES (?, ?, ?, ?)")
-      .run(email, String(body.name || "").trim(), hashPassword(password), role);
+    const { rows } = await db.query(
+      "INSERT INTO users (email, name, hash, role) VALUES ($1, $2, $3, $4) RETURNING id",
+      [email, String(body.name || "").trim(), hashPassword(password), role]
+    );
     return NextResponse.json({
-      user: { id: Number(result.lastInsertRowid), email, name: body.name || "", role, active: 1 },
+      user: { id: rows[0].id, email, name: body.name || "", role, active: true },
       // returned once so the admin can hand it over; not stored in plain text
       tempPassword: body.password ? undefined : password,
     });
   } catch (e) {
-    if (String(e.message).includes("UNIQUE")) {
+    if (e.code === "23505") {
       return NextResponse.json({ error: "A user with that email already exists." }, { status: 409 });
     }
     throw e;

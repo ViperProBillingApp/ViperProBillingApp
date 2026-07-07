@@ -11,6 +11,7 @@ export async function POST(req) {
   if (!verifyPassword(String(current), me.hash)) {
     return NextResponse.json({ error: "Current password is incorrect." }, { status: 401 });
   }
-  getDb().prepare("UPDATE users SET hash = ? WHERE id = ?").run(hashPassword(String(next)), me.id);
+  const db = await getDb();
+  await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(String(next)), me.id]);
   return NextResponse.json({ ok: true });
 }

@@ -31,10 +31,10 @@ export async function POST(req) {
   const optOut = event === "unsubscribed" || event === "spam";
   if (!status && !optOut) return NextResponse.json({ ok: true, ignored: event });
 
-  const db = getDb();
-  const row = db.prepare("SELECT value FROM kv WHERE key = 'state'").get();
-  if (!row) return NextResponse.json({ ok: true, ignored: "no state yet" });
-  const state = JSON.parse(row.value);
+  const db = await getDb();
+  const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
+  if (!rows[0]) return NextResponse.json({ ok: true, ignored: "no state yet" });
+  const state = JSON.parse(rows[0].value);
 
   let matched = 0;
   for (const c of state.clients || []) {
@@ -48,7 +48,7 @@ export async function POST(req) {
     ].slice(0, 200);
   }
   if (matched) {
-    db.prepare("UPDATE kv SET value = ? WHERE key = 'state'").run(JSON.stringify(state));
+    await db.query("UPDATE kv SET value = $1 WHERE key = 'state'", [JSON.stringify(state)]);
   }
   return NextResponse.json({ ok: true, event, matched });
 }

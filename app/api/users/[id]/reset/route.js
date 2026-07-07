@@ -9,13 +9,13 @@ export async function POST(req, { params }) {
 
   const { id } = await params;
   const userId = Number(id);
-  const db = getDb();
-  const target = db.prepare("SELECT id FROM users WHERE id = ?").get(userId);
-  if (!target) return NextResponse.json({ error: "User not found." }, { status: 404 });
+  const db = await getDb();
+  const { rows } = await db.query("SELECT id FROM users WHERE id = $1", [userId]);
+  if (!rows[0]) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
   const tempPassword = generatePassword();
-  db.prepare("UPDATE users SET hash = ? WHERE id = ?").run(hashPassword(tempPassword), userId);
-  destroyUserSessions(userId);
+  await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(tempPassword), userId]);
+  await destroyUserSessions(userId);
   // shown once to the admin; hand it to the user and have them change it
   return NextResponse.json({ tempPassword });
 }

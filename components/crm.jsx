@@ -14,8 +14,8 @@ const SYMBOL = { GBP: "£", USD: "$", EUR: "€" };
 
 /* ------------------------------ Axes ------------------------------ */
 const SEGMENTS = {
-  "viper-current": { label: "Viper — current", color: "#0E766E" },
-  "viper-past": { label: "Viper — past", color: "#8A94A6" },
+  "viper-current": { label: "Viper — Current", color: "#0E766E" },
+  "viper-past": { label: "Viper — Past", color: "#8A94A6" },
   "maritz-portal": { label: "Maritz — Viper Portal", color: "#3B5BA5" },
   "maritz-viper-portal": { label: "Maritz - Portal", color: "#7A4FB5" },
 };
@@ -78,17 +78,13 @@ function periodsBehind(c, now = new Date()) {
   if (c.stage === "marked-deletion") return 0;
   const cad = CADENCE[c.cadence]?.months || 1;
   const day = Number(c.billingDay) || 1;
-  const last = lastPaymentDate(c);
-  const anchor = last || parseDate(c.createdAt) || now;
+  // No payment on record yet? Anchor to signup instead — treats "just joined"
+  // the same as "just paid," so a brand-new client isn't instantly counted as
+  // owing their first period before a single billing cycle has even elapsed.
+  const anchor = lastPaymentDate(c) || parseDate(c.createdAt) || now;
   let diff = monthIndex(now) - monthIndex(anchor);
-  if (last) {
-    // current period not yet due if we're before the billing day
-    if (now.getDate() < day) diff -= 1;
-    return Math.max(0, Math.min(24, Math.floor(diff / cad)));
-  }
-  // never paid: the first period falls due on the first billing day after creation
-  let owed = Math.floor(diff / cad) + (now.getDate() >= day ? 1 : 0);
-  return Math.max(0, Math.min(24, owed));
+  if (now.getDate() < day) diff -= 1; // current period not yet due if we're before the billing day
+  return Math.max(0, Math.min(24, Math.floor(diff / cad)));
 }
 function totalOwed(c, now = new Date()) { return periodsBehind(c, now) * (Number(c.amount) || 0); }
 // Who needs a payment reminder. periodsBehind only works once we know recurring
@@ -190,6 +186,44 @@ ${SIGNATURE}`,
 ${SIGNATURE}`,
   },
 };
+const BUILTIN_COMMS_KEYS = Object.keys(COMMS);
+
+// Token substitution for staff-edited templates (settings.emailTemplates).
+function tokenize(str, tokens) {
+  return String(str || "").replace(/\{\{(\w+)\}\}/g, (_, k) => (tokens[k] ?? ""));
+}
+function templateTokens(c, s) {
+  const cur = c.currency || s.currency;
+  const owedN = totalOwed(c);
+  return {
+    firstName: firstName(c.name), name: c.name, company: c.company || c.name,
+    businessName: s.businessName, monthName: monthName(),
+    amount: Number(c.amount) > 0 ? money(c.amount, cur) : "",
+    owed: owedN > 0 ? money(owedN, cur) : "", periods: String(periodsBehind(c)),
+    cadence: CADENCE[c.cadence]?.label.toLowerCase() || "monthly", signature: SIGNATURE,
+  };
+}
+const TEMPLATE_TOKENS = ["firstName", "name", "company", "businessName", "monthName", "amount", "owed", "periods", "cadence", "signature"];
+// Merge built-in templates (dynamic, escalation-aware) with staff-edited overrides
+// from settings.emailTemplates (plain strings + {{tokens}}) and any brand-new
+// custom template types staff created on the Emails page.
+// ponytail: editing "reminder" replaces ALL of its escalation-tier wording with
+// one flat template — flagged in the Emails page UI, not worth a 3-tier editor.
+function getTemplates(settings) {
+  const custom = settings.emailTemplates || {};
+  const out = {};
+  for (const k of BUILTIN_COMMS_KEYS) {
+    const ov = custom[k];
+    out[k] = ov
+      ? { label: ov.label || COMMS[k].label, subject: (c, s) => tokenize(ov.subject, templateTokens(c, s)), body: (c, s) => tokenize(ov.body, templateTokens(c, s)) }
+      : COMMS[k];
+  }
+  for (const k of Object.keys(custom)) {
+    if (BUILTIN_COMMS_KEYS.includes(k)) continue;
+    out[k] = { label: custom[k].label || k, subject: (c, s) => tokenize(custom[k].subject, templateTokens(c, s)), body: (c, s) => tokenize(custom[k].body, templateTokens(c, s)) };
+  }
+  return out;
+}
 
 /* ---------------------------- Sample data ---------------------------- */
 const SAMPLE = [
@@ -218,6 +252,7 @@ function normalise(r) {
     billingDay: Math.min(28, Math.max(1, Number(r.billingDay) || 1)),
     cadence: CADENCE[r.cadence] ? r.cadence : "monthly",
     currency: SYMBOL[r.currency] ? r.currency : "",
+    coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -267,14 +302,25 @@ function exportCsv(clients) {
 /* =============================== App =============================== */
 export default function CRM({ user }) {
   const [clients, setClients] = useState([]);
-  const [settings, setSettings] = useState({ currency: "USD", businessName: "VIPER", senderName: "Darryl" });
+  const [settings, setSettings] = useState({ currency: "USD", businessName: "VIPER", senderName: "Darryl", emailTemplates: {} });
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [tab, setTab] = useState("digest");
   const [modal, setModal] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [composeId, setComposeId] = useState(null);
+  const [composeType, setComposeType] = useState("reminder");
   const [commsQueue, setCommsQueue] = useState(null); // client ids picked on the Clients tab → Comms
+  const [toast, setToast] = useState("");
+
+  const templates = useMemo(() => getTemplates(settings), [settings]);
+
+  const showToast = useCallback((msg) => setToast(msg), []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(""), 2600);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // shared by the Comms tab and the per-row email compose dialog
   const logSent = useCallback((id, key, patch, label) => {
@@ -390,6 +436,7 @@ export default function CRM({ user }) {
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
         <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
+        <MenuItem onClick={() => setModal("emails")}>Emails</MenuItem>
         <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
@@ -426,10 +473,10 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} onOpen={setDetailId} onEmail={setComposeId} onEmailAll={(ids) => { setCommsQueue(ids); setTab("comms"); }} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={(id, type) => { setComposeId(id); setComposeType(type || "reminder"); }} onEmailAll={(ids) => { setCommsQueue(ids); setTab("comms"); }} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} onLogSent={logSent} queue={commsQueue} onClearQueue={() => setCommsQueue(null)} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} queue={commsQueue} onClearQueue={() => setCommsQueue(null)} onOpen={setDetailId} onSent={showToast} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -445,10 +492,16 @@ export default function CRM({ user }) {
       </main>
 
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }} />}
-      {compose && <ComposeModal client={compose} settings={settings} onClose={() => setComposeId(null)} onLogSent={logSent} />}
+      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
+      {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} /></Modal>}
+      {toast && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
+          ✓ {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -469,15 +522,16 @@ function MenuItem({ onClick, children }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, onLogSent, onDone }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent }) {
+  const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
-  const subject = saved.subject ?? COMMS[type].subject(client, settings);
-  const body = saved.body ?? COMMS[type].body(client, settings);
+  const subject = saved.subject ?? tpl.subject(client, settings);
+  const body = saved.body ?? tpl.body(client, settings);
   const [copied, setCopied] = useState(false);
   const [send, setSend] = useState({ busy: false, err: "" });
   const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
-  const markSent = (via) => onLogSent(client.id, key, { sentAt: new Date().toISOString(), via }, COMMS[type].label);
+  const markSent = (via) => onLogSent(client.id, key, { sentAt: new Date().toISOString(), via, subject, body, label: tpl.label }, tpl.label);
   const sendNow = async () => {
     setSend({ busy: true, err: "" });
     try {
@@ -490,6 +544,7 @@ function EmailEditor({ client, settings, type, onLogSent, onDone }) {
       if (!r.ok) { setSend({ busy: false, err: d.error || "Send failed." }); return; }
       markSent("brevo");
       setSend({ busy: false, err: "" });
+      onSent?.(`Sent to ${client.company || client.name}`);
       onDone?.();
     } catch { setSend({ busy: false, err: "Send failed — try again." }); }
   };
@@ -514,13 +569,14 @@ function EmailEditor({ client, settings, type, onLogSent, onDone }) {
   );
 }
 
-// Per-client email compose dialog (opened from the list's email button).
-function ComposeModal({ client, settings, onClose, onLogSent }) {
-  const [type, setType] = useState("reminder");
+// Per-client email compose dialog (opened from the list's email icon menu,
+// pre-set to whichever template was picked there).
+function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent }) {
+  const [type, setType] = useState(initialType || "reminder");
   return (
     <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
-      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} onLogSent={onLogSent} onDone={onClose} />
+      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} />
     </Modal>
   );
 }
@@ -528,24 +584,32 @@ function ComposeModal({ client, settings, onClose, onLogSent }) {
 /* ---------------------------- Stat strip ---------------------------- */
 function StatStrip({ clients, settings, bounced }) {
   const s = useMemo(() => {
-    const owedByCur = {}; let overdue = 0, mrr = 0, notUpToDate = 0, followUps = 0;
+    const owedByCur = {}; let overdue = 0, mrr = 0, notUpToDate = 0, followUps = 0, synced = 0;
     const now = new Date();
     for (const c of clients) {
       const cur = c.currency || settings.currency;
-      const behind = periodsBehind(c, now);
-      if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
+      // Prefer ChargeOver's own balance (live from last sync) over the
+      // periods×amount estimate — that estimate is only as good as `amount`,
+      // which most imported clients don't have set.
+      if (c.coBalance != null) {
+        synced++;
+        if (c.coBalance > 0) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + c.coBalance; }
+      } else {
+        const behind = periodsBehind(c, now);
+        if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
+      }
       if (!["marked-deletion", "never-charged"].includes(c.billingStatus) && c.stage !== "marked-deletion") mrr += monthlyValue(c);
       if (["not-up-to-date", "payment-failed"].includes(c.billingStatus)) notUpToDate++;
       if (followUpDue(c, now)) followUps++;
     }
     const owedStr = Object.entries(owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
-    return { owedStr, overdue, mrr, notUpToDate, followUps };
+    return { owedStr, overdue, mrr, notUpToDate, followUps, synced, total: clients.length };
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 18 }}>
       <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
-      <Stat label="Total owed" value={s.owedStr} sub={`${s.overdue} clients in arrears`} accent={C.red} small={s.owedStr.length > 12} />
-      <Stat label="Monthly Recurring Revenue (active)" value={money(Math.round(s.mrr), settings.currency)} sub="normalised monthly" accent={C.green} />
+      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} clients in arrears (run Sync ChargeOver)`} accent={C.red} small={s.owedStr.length > 12} />
+      <Stat label="Monthly Recurring Revenue (active)" value={money(Math.round(s.mrr), settings.currency)} sub="from recorded amounts" accent={C.green} />
       <Stat label="Follow-ups due" value={String(s.followUps)} sub="scheduled to chase today" accent={s.followUps ? C.amber : C.green} />
       <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} />
     </section>
@@ -591,7 +655,36 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
   );
 }
 
-function ClientsTab({ clients, settings, onOpen, onEmail, onEmailAll }) {
+// Mail icon → small popover menu to pick which template to send before the
+// compose dialog opens, instead of always defaulting to "Payment reminder".
+function EmailIconMenu({ client, templates, onPick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
+      <button onClick={() => setOpen((v) => !v)} title="Email this client" aria-label={`Email ${client.company || client.name}`}
+        style={{ background: "none", border: "none", cursor: "pointer", color: C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
+          <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 41, minWidth: 190, overflow: "hidden" }}>
+            {Object.entries(templates).map(([k, v]) => (
+              <button key={k} onClick={() => { onPick(k); setOpen(false); }}
+                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", fontSize: 12.5, fontWeight: 500, background: "none", border: "none", cursor: "pointer", color: C.ink }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll, onUpdate, onUpdateWithLog }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
@@ -656,8 +749,18 @@ function ClientsTab({ clients, settings, onOpen, onEmail, onEmailAll }) {
                 </div>
                 <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.email || "no email"}{c.chargeoverId ? ` · CO#${c.chargeoverId}` : ""}</div>
               </div>
-              <div><Pill fg={BILLING[c.billingStatus].color} bg={BILLING[c.billingStatus].bg}>{BILLING[c.billingStatus].label}</Pill></div>
-              <div style={{ fontSize: 12.5, color: STAGES[c.stage].color, fontWeight: 600 }}>{STAGES[c.stage].label}</div>
+              <div>
+                <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
+                  title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
+                  {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
+                  title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
+                  {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
+                </select>
+              </div>
               <div style={{ textAlign: "right" }}>
                 {behind >= 1
                   ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(behind * c.amount, cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
@@ -667,11 +770,7 @@ function ClientsTab({ clients, settings, onOpen, onEmail, onEmailAll }) {
                 {Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
               </div>
               <div style={{ textAlign: "right" }}>
-                <button onClick={(e) => { e.stopPropagation(); onEmail(c.id); }} title="Email this client" aria-label={`Email ${c.company || c.name}`}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
-                </button>
+                <EmailIconMenu client={c} templates={templates} onPick={(type) => onEmail(c.id, type)} />
               </div>
             </div>
           );
@@ -774,7 +873,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 // filters + "Email these N") or falls out of the template's natural audience —
 // no duplicate status filters here. Sent/unsent state is visible per recipient,
 // and sending auto-advances to the next unsent.
-function CommsTab({ clients, settings, onLogSent, queue, onClearQueue }) {
+function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue, onOpen, onSent }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
   const key = `${type}:${periodKey()}`;
@@ -812,13 +911,12 @@ function CommsTab({ clients, settings, onLogSent, queue, onClearQueue }) {
     reminder: "everyone overdue or not up to date in ChargeOver",
     price: "everyone on old pricing",
     deletion: "accounts marked for deletion",
-    custom: "all contactable clients",
-  }[type];
+  }[type] || "all contactable clients";
 
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
-        <MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} />
+        <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
         {queue ? (
           <span className="flex items-center" style={{ gap: 8, fontSize: 12.5, color: C.action, fontWeight: 600, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 20, padding: "6px 12px" }}>
             Your selection from Clients · {audience.length}
@@ -861,12 +959,14 @@ function CommsTab({ clients, settings, onLogSent, queue, onClearQueue }) {
           <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 18 }}>
             <div style={{ marginBottom: 14 }}>
               <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 15, fontWeight: 700 }}>{client.company || client.name}</span>
+                <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink, textDecoration: "underline", textDecorationColor: C.lineSoft, textUnderlineOffset: 3 }}>
+                  {client.company || client.name}
+                </button>
                 {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {periodsBehind(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
               </div>
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} onLogSent={onLogSent} onDone={advance} />
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} />
           </div>
         </div>
       )}
@@ -935,6 +1035,11 @@ function PastCharges({ client }) {
   }, [client.chargeoverId]);
   return (
     <Section title="Past charges (ChargeOver)">
+      {client.coBalance != null && (
+        <div style={{ fontSize: 12.5, marginBottom: 8, color: client.coBalance > 0 ? C.red : C.green, fontWeight: 600 }}>
+          Live balance: {money(client.coBalance, client.currency)} <span style={{ color: C.faint, fontWeight: 500 }}>· as of last sync</span>
+        </div>
+      )}
       {state.loading && <div style={{ fontSize: 12, color: C.faint }}>Loading from ChargeOver…</div>}
       {!state.loading && state.error && <div style={{ fontSize: 12, color: C.faint }}>{state.error === "ChargeOver not connected" ? "Connect ChargeOver to see charges." : "Couldn't load charges — try again."}</div>}
       {!state.loading && !state.error && state.invoices.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No charges on record.</div>}
@@ -1062,14 +1167,11 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
 
           {client.chargeoverId && <PastCharges client={client} />}
 
-          {/* Sent comms */}
+          {/* Sent comms — a copy of every message sent, newest first */}
           {sentComms.length > 0 && (
             <Section title="Communications sent">
-              {sentComms.map(([k, v]) => (
-                <div key={k} className="flex justify-between" style={{ fontSize: 12.5, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
-                  <span>{COMMS[k.split(":")[0]]?.label || k} · {k.split(":")[1]}</span>
-                  <span style={{ fontFamily: MONO, color: C.sub }}>{fmtDate(v.sentAt)}</span>
-                </div>
+              {[...sentComms].sort((a, b) => new Date(b[1].sentAt) - new Date(a[1].sentAt)).map(([k, v]) => (
+                <SentCommRow key={k} tKey={k} v={v} />
               ))}
             </Section>
           )}
@@ -1117,6 +1219,26 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
 }
 
 /* ------------------------------ Shared ------------------------------ */
+// One sent-email row in the client card — collapsed to label+date, expands to
+// the exact subject/body/channel that went out.
+function SentCommRow({ tKey, v }) {
+  const [open, setOpen] = useState(false);
+  const label = v.label || COMMS[tKey.split(":")[0]]?.label || tKey.split(":")[0];
+  return (
+    <div style={{ borderBottom: `1px solid ${C.lineSoft}`, padding: "6px 0" }}>
+      <button onClick={() => setOpen((o) => !o)} className="flex justify-between items-center" style={{ width: "100%", background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
+        <span style={{ fontSize: 12.5 }}>{label} · {tKey.split(":")[1]}{v.via === "brevo" ? " · Brevo" : v.via === "manual" ? " · sent manually" : ""}</span>
+        <span style={{ fontFamily: MONO, color: C.sub, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{fmtDate(v.sentAt)} {open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <div style={{ marginTop: 8, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>{v.subject || "(no subject saved)"}</div>
+          <div style={{ whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{v.body || "(message not saved — sent before this was tracked)"}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 function Section({ title, children }) {
   return (
     <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, marginBottom: 14 }}>
@@ -1220,6 +1342,104 @@ function SettingsPanel({ settings, onSave }) {
     </div>
   );
 }
+
+// Realistic starting text when editing a built-in template — its subject/body
+// are functions (escalation-aware), so seed the editor with real generated
+// copy for a representative client rather than trying to reverse-tokenize it.
+const EXAMPLE_CLIENT = {
+  name: "Alex Morgan", company: "Example Co", amount: 500, currency: "USD", cadence: "monthly",
+  billingDay: 1, createdAt: monthsAgo(3), lastPaid: monthsAgo(2), payments: [],
+  billingStatus: "not-up-to-date", stage: "need-to-contact", tags: [],
+};
+function slugify(label, existing) {
+  const base = label.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "template";
+  let key = base, n = 2;
+  while (BUILTIN_COMMS_KEYS.includes(key) || existing[key]) key = `${base}-${n++}`;
+  return key;
+}
+function EmailTemplatesPanel({ settings, onSave }) {
+  const custom = settings.emailTemplates || {};
+  const [editingKey, setEditingKey] = useState(null); // a real key, or "__new__"
+  const [form, setForm] = useState({ label: "", subject: "", body: "" });
+  const allKeys = [...BUILTIN_COMMS_KEYS, ...Object.keys(custom).filter((k) => !BUILTIN_COMMS_KEYS.includes(k))];
+
+  const startEdit = (key) => {
+    const ov = custom[key];
+    const base = BUILTIN_COMMS_KEYS.includes(key) ? COMMS[key] : null;
+    setForm({
+      label: ov?.label || base?.label || key,
+      subject: ov?.subject ?? (base ? base.subject(EXAMPLE_CLIENT, settings) : ""),
+      body: ov?.body ?? (base ? base.body(EXAMPLE_CLIENT, settings) : ""),
+    });
+    setEditingKey(key);
+  };
+  const startNew = () => { setForm({ label: "", subject: "", body: "" }); setEditingKey("__new__"); };
+  const save = () => {
+    const label = form.label.trim();
+    if (!label || !form.subject.trim() || !form.body.trim()) return;
+    const key = editingKey === "__new__" ? slugify(label, custom) : editingKey;
+    onSave({ ...settings, emailTemplates: { ...custom, [key]: { label, subject: form.subject, body: form.body } } });
+    setEditingKey(null);
+  };
+  const resetToDefault = (key) => {
+    const next = { ...custom }; delete next[key];
+    onSave({ ...settings, emailTemplates: next });
+    setEditingKey(null);
+  };
+  const remove = (key) => {
+    const next = { ...custom }; delete next[key];
+    onSave({ ...settings, emailTemplates: next });
+    if (editingKey === key) setEditingKey(null);
+  };
+
+  if (editingKey) {
+    const builtin = BUILTIN_COMMS_KEYS.includes(editingKey);
+    return (
+      <div>
+        <Field label="Name"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
+        <Field label="Subject"><input style={inputStyle} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
+        <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></Field>
+        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
+          Placeholders, filled in per client when sent: {TEMPLATE_TOKENS.map((t) => `{{${t}}}`).join("  ")}
+          {builtin && editingKey === "reminder" && " — note: the built-in payment reminder normally escalates its wording as an account falls further behind (reminder → second reminder → final notice). Saving here replaces all of that with this one fixed message."}
+        </p>
+        <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: 8 }}>
+          <div className="flex" style={{ gap: 8 }}>
+            <SolidBtn onClick={save}>Save</SolidBtn>
+            <GhostBtn onClick={() => setEditingKey(null)}>Cancel</GhostBtn>
+          </div>
+          {builtin && custom[editingKey] && <button onClick={() => resetToDefault(editingKey)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Reset to default wording</button>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>These feed the Comms tab and the per-client email button. Edit the built-in ones or add your own.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+        {allKeys.map((key) => {
+          const builtin = BUILTIN_COMMS_KEYS.includes(key);
+          const label = custom[key]?.label || (builtin ? COMMS[key].label : key);
+          return (
+            <div key={key} className="flex items-center justify-between" style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</div>
+                <div style={{ fontSize: 11, color: C.faint }}>{builtin ? "Built-in" : "Custom"}{custom[key] && builtin ? " · edited" : ""}</div>
+              </div>
+              <div className="flex" style={{ gap: 6, flexShrink: 0 }}>
+                <GhostBtn onClick={() => startEdit(key)}>Edit</GhostBtn>
+                {!builtin && <button onClick={() => remove(key)} style={{ fontSize: 12.5, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
+    </div>
+  );
+}
+
 function Modal({ title, onClose, children }) {
   return (
     <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>

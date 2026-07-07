@@ -91,7 +91,13 @@ function periodsBehind(c, now = new Date()) {
   return Math.max(0, Math.min(24, owed));
 }
 function totalOwed(c, now = new Date()) { return periodsBehind(c, now) * (Number(c.amount) || 0); }
-function isOverdue(c, now = new Date()) { return periodsBehind(c, now) >= 1; }
+// Who needs a payment reminder. periodsBehind only works once we know recurring
+// amounts — the ChargeOver billing status is the reliable signal for CSV-imported
+// clients, so either counts.
+function needsReminder(c, now = new Date()) {
+  if (["never-charged", "marked-deletion"].includes(c.billingStatus) || c.stage === "marked-deletion") return false;
+  return periodsBehind(c, now) >= 1 || ["not-up-to-date", "payment-failed"].includes(c.billingStatus);
+}
 function escalationOf(c) {
   const n = periodsBehind(c);
   if (n >= 3) return { level: 3, label: "Final notice", color: C.red };
@@ -113,18 +119,21 @@ const COMMS = {
     label: "Payment reminder",
     subject: (c, s) => {
       const e = escalationOf(c);
-      if (e?.level === 3) return `Final notice — outstanding balance of ${money(totalOwed(c), c.currency || s.currency)}`;
+      const owed = totalOwed(c);
+      if (e?.level === 3) return owed > 0 ? `Final notice — outstanding balance of ${money(owed, c.currency || s.currency)}` : "Final notice — outstanding balance on your account";
       if (e?.level === 2) return `Second reminder — ${monthName()} payment outstanding`;
       return `Payment reminder — ${monthName()}`;
     },
     body: (c, s) => {
       const cur = c.currency || s.currency;
-      const owed = money(totalOwed(c), cur);
+      const owedN = totalOwed(c);
+      // amounts may be unknown (CSV import) — never write "$0" to a client
+      const owed = owedN > 0 ? money(owedN, cur) : null;
       const n = periodsBehind(c);
       const e = escalationOf(c);
       if (e?.level === 3) return `Hi ${firstName(c.name)},
 
-Despite previous reminders, your account shows an outstanding balance of ${owed} covering ${n} billing periods.
+Despite previous reminders, your account shows ${owed ? `an outstanding balance of ${owed} covering ${n} billing periods` : "an outstanding balance"}.
 
 Please arrange payment within 7 days, or get in touch to discuss a payment plan. If we don't hear from you, we may have to suspend service while the account is resolved — which we'd much rather avoid.
 
@@ -133,14 +142,14 @@ If you believe this is in error, reply and we'll sort it straight away.
 ${SIGNATURE}`;
       if (e?.level === 2) return `Hi ${firstName(c.name)},
 
-Following up on my earlier note — your balance of ${owed} (${n} billing periods) is still showing as outstanding.
+Following up on my earlier note — ${owed ? `your balance of ${owed} (${n} billing periods)` : "your account balance"} is still showing as outstanding.
 
 If there's an issue with the invoice or you'd like to spread the payment, just reply and we'll work something out. Otherwise you can settle it at your convenience.
 
 ${SIGNATURE}`;
       return `Hi ${firstName(c.name)},
 
-A quick reminder that your ${monthName()} payment of ${money(c.amount, cur)} is currently showing as outstanding.
+A quick reminder that your ${monthName()} payment${Number(c.amount) > 0 ? ` of ${money(c.amount, cur)}` : ""} is currently showing as outstanding.
 
 If it's already on its way, please ignore this. Otherwise you can settle it whenever suits — just reply if you'd like a fresh invoice.
 
@@ -265,6 +274,7 @@ export default function CRM({ user }) {
   const [modal, setModal] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [composeId, setComposeId] = useState(null);
+  const [commsQueue, setCommsQueue] = useState(null); // client ids picked on the Clients tab → Comms
 
   // shared by the Comms tab and the per-row email compose dialog
   const logSent = useCallback((id, key, patch, label) => {
@@ -407,7 +417,7 @@ export default function CRM({ user }) {
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />
 
         <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-          {[["digest", "Daily digest"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", "Comms"]].map(([k, t]) => (
+          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", `Comms${commsQueue ? ` · ${commsQueue.length}` : ""}`]].map(([k, t]) => (
             <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
           ))}
         </nav>
@@ -416,10 +426,10 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} onOpen={setDetailId} onEmail={setComposeId} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} onOpen={setDetailId} onEmail={setComposeId} onEmailAll={(ids) => { setCommsQueue(ids); setTab("comms"); }} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} onLogSent={logSent} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} onLogSent={logSent} queue={commsQueue} onClearQueue={() => setCommsQueue(null)} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -457,29 +467,60 @@ function MenuItem({ onClick, children }) {
   );
 }
 
-// Per-client email compose dialog (opened from the list's email button).
-function ComposeModal({ client, settings, onClose, onLogSent }) {
-  const [type, setType] = useState("reminder");
-  const [copied, setCopied] = useState(false);
+// One email, fully editable, three ways out: copy, real Brevo send, or mark
+// sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
+function EmailEditor({ client, settings, type, onLogSent, onDone }) {
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
   const subject = saved.subject ?? COMMS[type].subject(client, settings);
   const body = saved.body ?? COMMS[type].body(client, settings);
+  const [copied, setCopied] = useState(false);
+  const [send, setSend] = useState({ busy: false, err: "" });
   const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  const markSent = (via) => onLogSent(client.id, key, { sentAt: new Date().toISOString(), via }, COMMS[type].label);
+  const sendNow = async () => {
+    setSend({ busy: true, err: "" });
+    try {
+      const r = await fetch("/api/comms/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: client.email, name: client.name, subject, body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setSend({ busy: false, err: d.error || "Send failed." }); return; }
+      markSent("brevo");
+      setSend({ busy: false, err: "" });
+      onDone?.();
+    } catch { setSend({ busy: false, err: "Send failed — try again." }); }
+  };
   return (
-    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
-      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} /></Field>
-      <Field label="To"><div style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8 }}>{client.email || "No email on file — add one first"}</div></Field>
-      <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8 }}>{FROM_EMAIL}</div></Field>
+    <div>
+      <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="To"><div style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{client.email || "No email on file — add one first"}</div></Field>
+        <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{FROM_EMAIL}</div></Field>
+      </div>
       <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
       <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-        <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy for Brevo"}</GhostBtn>
-        <button onClick={() => onLogSent(client.id, key, { sentAt: new Date().toISOString() }, COMMS[type].label)} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer" }}>
-          {saved.sentAt ? "Marked sent ✓" : "Mark sent"}
+        <button onClick={sendNow} disabled={!client.email || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !client.email || send.busy ? C.grey : C.action, color: "#fff", cursor: !client.email || send.busy ? "default" : "pointer" }}>
+          {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
         </button>
-        {saved.sentAt && <span style={{ fontSize: 12, color: C.green }}>Sent {fmtDate(saved.sentAt)}</span>}
+        <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
+        <GhostBtn onClick={() => { markSent("manual"); onDone?.(); }}>Mark sent</GhostBtn>
+        {saved.sentAt && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
+        {send.err && <span style={{ fontSize: 12, color: C.red }}>{send.err}</span>}
       </div>
+    </div>
+  );
+}
+
+// Per-client email compose dialog (opened from the list's email button).
+function ComposeModal({ client, settings, onClose, onLogSent }) {
+  const [type, setType] = useState("reminder");
+  return (
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
+      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} /></Field>
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} onLogSent={onLogSent} onDone={onClose} />
     </Modal>
   );
 }
@@ -487,25 +528,25 @@ function ComposeModal({ client, settings, onClose, onLogSent }) {
 /* ---------------------------- Stat strip ---------------------------- */
 function StatStrip({ clients, settings, bounced }) {
   const s = useMemo(() => {
-    const owedByCur = {}; let overdue = 0, mrr = 0, oldPricing = 0, followUps = 0;
+    const owedByCur = {}; let overdue = 0, mrr = 0, notUpToDate = 0, followUps = 0;
     const now = new Date();
     for (const c of clients) {
       const cur = c.currency || settings.currency;
       const behind = periodsBehind(c, now);
       if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
       if (!["marked-deletion", "never-charged"].includes(c.billingStatus) && c.stage !== "marked-deletion") mrr += monthlyValue(c);
-      if (c.billingStatus === "old-pricing") oldPricing++;
+      if (["not-up-to-date", "payment-failed"].includes(c.billingStatus)) notUpToDate++;
       if (followUpDue(c, now)) followUps++;
     }
     const owedStr = Object.entries(owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
-    return { owedStr, overdue, mrr, oldPricing, followUps };
+    return { owedStr, overdue, mrr, notUpToDate, followUps };
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 18 }}>
+      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
       <Stat label="Total owed" value={s.owedStr} sub={`${s.overdue} clients in arrears`} accent={C.red} small={s.owedStr.length > 12} />
       <Stat label="Monthly Recurring Revenue (active)" value={money(Math.round(s.mrr), settings.currency)} sub="normalised monthly" accent={C.green} />
       <Stat label="Follow-ups due" value={String(s.followUps)} sub="scheduled to chase today" accent={s.followUps ? C.amber : C.green} />
-      <Stat label="On old pricing" value={String(s.oldPricing)} sub="increase candidates" accent={C.amber} />
       <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} />
     </section>
   );
@@ -550,7 +591,7 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
   );
 }
 
-function ClientsTab({ clients, settings, onOpen, onEmail }) {
+function ClientsTab({ clients, settings, onOpen, onEmail, onEmailAll }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
@@ -583,6 +624,9 @@ function ClientsTab({ clients, settings, onOpen, onEmail }) {
           {activeCount > 0 && <span style={{ color: C.action, fontWeight: 600 }}> · {activeCount} filter{activeCount > 1 ? "s" : ""} active</span>}
         </span>
         {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
+        {list.length > 0 && !showArchived && (
+          <MiniBtn onClick={() => onEmailAll(list.map((c) => c.id))}>✉ Email these {list.length}</MiniBtn>
+        )}
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
@@ -617,8 +661,10 @@ function ClientsTab({ clients, settings, onOpen, onEmail }) {
               <div style={{ textAlign: "right" }}>
                 {behind >= 1
                   ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(behind * c.amount, cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
-                  : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
-                <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>
+                  : needsReminder(c)
+                    ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
+                    : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
+                {Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
               </div>
               <div style={{ textAlign: "right" }}>
                 <button onClick={(e) => { e.stopPropagation(); onEmail(c.id); }} title="Email this client" aria-label={`Email ${c.company || c.name}`}
@@ -653,7 +699,7 @@ function WorkflowTab({ clients, onOpen, onStage }) {
               {col.map((c) => (
                 <div key={c.id} style={{ background: C.paper, borderRadius: 8, padding: "8px 10px", border: `1px solid ${followUpDue(c) ? C.amber : C.line}` }}>
                   <button onClick={() => onOpen(c.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", width: "100%" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
                     <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{periodsBehind(c) ? ` · ${periodsBehind(c)}p behind` : ""}</div>
                     {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
                   </button>
@@ -699,8 +745,8 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
     <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 16 }}>
       <div className="flex flex-wrap items-center justify-between" style={{ gap: 10 }}>
         <div>
-          <button onClick={() => onOpen(client.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink }}>{client.name}</button>
-          <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}><span style={{ textDecoration: "line-through", color: C.red }}>{client.email}</span> · {client.company}</div>
+          <button onClick={() => onOpen(client.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink }}>{client.company || client.name}</button>
+          <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}><span style={{ textDecoration: "line-through", color: C.red }}>{client.email}</span> · {client.name}</div>
         </div>
         <SolidBtn onClick={run}>{busy ? "Searching…" : client.candidates?.length ? "Search again" : "Find alternative contact"}</SolidBtn>
       </div>
@@ -724,69 +770,103 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 }
 
 /* ----------------------------- Comms tab ----------------------------- */
-function CommsTab({ clients, settings, onLogSent }) {
+// Queue + editor. WHO to email is decided on the Clients tab (its status
+// filters + "Email these N") or falls out of the template's natural audience —
+// no duplicate status filters here. Sent/unsent state is visible per recipient,
+// and sending auto-advances to the next unsent.
+function CommsTab({ clients, settings, onLogSent, queue, onClearQueue }) {
   const [type, setType] = useState("reminder");
-  const [seg, setSeg] = useState("all");
-  const [bill, setBill] = useState("all");
-  const [idx, setIdx] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [selId, setSelId] = useState(null);
   const key = `${type}:${periodKey()}`;
 
-  const audience = useMemo(() => {
-    let l = clients.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok");
-    // deletion notices go TO accounts marked for deletion; every other type excludes them
-    if (type === "deletion") l = l.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
-    else l = l.filter((c) => c.stage !== "marked-deletion");
-    if (type === "reminder") l = l.filter((c) => isOverdue(c) && !["never-charged", "marked-deletion"].includes(c.billingStatus));
-    if (seg !== "all") l = l.filter((c) => c.segment === seg);
-    if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
-    if (type === "reminder") l = [...l].sort((a, b) => periodsBehind(b) - periodsBehind(a));
-    return l;
-  }, [clients, type, seg, bill]);
+  const [audience, skipped] = useMemo(() => {
+    let l;
+    if (queue) {
+      const byId = new Map(clients.map((c) => [c.id, c]));
+      l = queue.map((id) => byId.get(id)).filter(Boolean);
+    } else if (type === "deletion") {
+      l = clients.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
+    } else {
+      l = clients.filter((c) => c.stage !== "marked-deletion");
+      if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => periodsBehind(b) - periodsBehind(a));
+      if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
+    }
+    const before = l.length;
+    l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
+    return [l, before - l.length];
+  }, [clients, type, queue]);
 
-  useEffect(() => { setIdx(0); }, [type, seg, bill]);
-  const client = audience[Math.min(idx, Math.max(0, audience.length - 1))];
-  const saved = (client?.reminders && client.reminders[key]) || {};
-  const subject = saved.subject ?? (client ? COMMS[type].subject(client, settings) : "");
-  const body = saved.body ?? (client ? COMMS[type].body(client, settings) : "");
+  useEffect(() => { setSelId(null); }, [type, queue]);
+  const sentOf = (c) => c.reminders?.[key]?.sentAt;
+  const client = audience.find((c) => c.id === selId) || audience.find((c) => !sentOf(c)) || audience[0];
+  const sentCount = audience.filter(sentOf).length;
+  const advance = () => {
+    if (!client) return;
+    const i = audience.findIndex((c) => c.id === client.id);
+    const next = audience.slice(i + 1).find((c) => !sentOf(c)) || audience.slice(0, i).find((c) => !sentOf(c));
+    if (next) setSelId(next.id);
+  };
   const esc = client && type === "reminder" ? escalationOf(client) : null;
-  const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+
+  const audienceHint = {
+    reminder: "everyone overdue or not up to date in ChargeOver",
+    price: "everyone on old pricing",
+    deletion: "accounts marked for deletion",
+    custom: "all contactable clients",
+  }[type];
 
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
         <MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} />
-        <MiniSelect value={seg} onChange={setSeg} options={[["all", "All segments"], ...Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])]} />
-        <MiniSelect value={bill} onChange={setBill} options={[["all", "All billing"], ...Object.entries(BILLING).map(([k, v]) => [k, v.label])]} />
-        <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub }}>{audience.length} in audience · opted-out, bounced & deletion excluded</span>
+        {queue ? (
+          <span className="flex items-center" style={{ gap: 8, fontSize: 12.5, color: C.action, fontWeight: 600, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 20, padding: "6px 12px" }}>
+            Your selection from Clients · {audience.length}
+            <button onClick={onClearQueue} title="Back to the template's automatic audience" style={{ background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 12, padding: 0 }}>✕ clear</button>
+          </span>
+        ) : (
+          <span style={{ fontSize: 12.5, color: C.sub }}>Audience: {audienceHint} — or pick exactly who on the Clients tab → “Email these”.</span>
+        )}
+        <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
+          {sentCount}/{audience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
+        </span>
       </div>
       {!client ? (
-        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>No eligible recipients for this selection.</div>
+        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+          No eligible recipients{skipped ? ` — ${skipped} were skipped (opted out, bounced, or missing an email)` : " for this selection"}.
+        </div>
       ) : (
-        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 18 }}>
-          <div className="flex items-center justify-between" style={{ marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-            <div>
-              <div className="flex items-center" style={{ gap: 8 }}>
-                <span style={{ fontSize: 15, fontWeight: 700 }}>{client.name}</span>
-                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {periodsBehind(client)}p behind · {money(totalOwed(client), client.currency || settings.currency)}</MiniPill>}
-                {saved.sentAt && <MiniPill fg={C.green} bg={C.greenBg}>sent {fmtDate(saved.sentAt)}</MiniPill>}
-              </div>
-              <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.email} · {SEGMENTS[client.segment].label}</div>
-            </div>
-            <div className="flex items-center" style={{ gap: 6 }}>
-              <button disabled={idx === 0} onClick={() => setIdx((i) => Math.max(0, i - 1))} style={navBtn(idx === 0)}>←</button>
-              <span style={{ fontSize: 12, color: C.sub, fontFamily: MONO }}>{idx + 1}/{audience.length}</span>
-              <button disabled={idx >= audience.length - 1} onClick={() => setIdx((i) => Math.min(audience.length - 1, i + 1))} style={navBtn(idx >= audience.length - 1)}>→</button>
-            </div>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(210px, 270px) 1fr", gap: 14, alignItems: "start" }}>
+          {/* Recipient queue */}
+          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "auto", maxHeight: 640 }}>
+            {audience.map((c) => {
+              const sent = sentOf(c);
+              const on = c.id === client.id;
+              const behind = periodsBehind(c);
+              return (
+                <button key={c.id} onClick={() => setSelId(c.id)}
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, borderLeft: `3px solid ${on ? C.action : "transparent"}`, background: on ? C.lineSoft : "transparent" }}>
+                  <div className="flex items-center justify-between" style={{ gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
+                    {sent && <span style={{ color: C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.sub, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {behind >= 1 ? `${money(totalOwed(c), c.currency || settings.currency)} · ${behind}p behind` : BILLING[c.billingStatus].label}
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8 }}>{FROM_EMAIL}</div></Field>
-          <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
-          <Field label="Message"><textarea rows={12} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
-          <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-            <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy for Brevo"}</GhostBtn>
-            <button onClick={() => onLogSent(client.id, key, { sentAt: new Date().toISOString() }, COMMS[type].label)} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer" }}>
-              {saved.sentAt ? "Marked sent ✓" : "Mark sent"}
-            </button>
+          {/* Editor */}
+          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 18 }}>
+            <div style={{ marginBottom: 14 }}>
+              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 15, fontWeight: 700 }}>{client.company || client.name}</span>
+                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {periodsBehind(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
+              </div>
+              <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
+            </div>
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} onLogSent={onLogSent} onDone={advance} />
           </div>
         </div>
       )}
@@ -794,11 +874,11 @@ function CommsTab({ clients, settings, onLogSent }) {
   );
 }
 
-/* ----------------------------- Digest tab ----------------------------- */
+/* ----------------------------- Today tab ----------------------------- */
 function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const now = new Date();
-  const overdueList = clients.filter((c) => isOverdue(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out") && !["never-charged"].includes(c.billingStatus));
-  const finals = overdueList.filter((c) => periodsBehind(c, now) >= 3);
+  const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
+  const finals = reminderList.filter((c) => periodsBehind(c, now) >= 3);
   const followUps = clients.filter((c) => followUpDue(c, now));
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
@@ -811,11 +891,10 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   return (
     <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, alignItems: "start" }}>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20 }}>
-        <div style={{ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>Preview · daily approval email</div>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: "6px 0 4px", fontFamily: DISPLAY }}>Today's outbound queue</h2>
-        <p style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>In production this lands in your inbox each morning. Nothing sends until you approve.</p>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 4px", fontFamily: DISPLAY }}>What needs attention</h2>
+        <p style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>Live counts — click through to act. Nothing sends without your review.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <Row n={overdueList.length} label="Payment reminders ready" tint={C.red} to="comms" />
+          <Row n={reminderList.length} label="Payment reminders to send" tint={C.red} to="comms" />
           <Row n={finals.length} label="Final notices (3+ periods behind)" tint={C.red} to="comms" />
           <Row n={followUps.length} label="Follow-ups due today" tint={C.amber} to="workflow" />
           <Row n={oldPricing.length} label="Old pricing — notices to send" tint={C.amber} to="comms" />
@@ -829,7 +908,7 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
           {followUps.map((c) => (
             <button key={c.id} onClick={() => onOpen(c.id)} className="flex items-center justify-between" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${C.lineSoft}`, padding: "9px 2px", cursor: "pointer" }}>
               <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{c.name}</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
                 <div style={{ fontSize: 11.5, color: C.sub }}>{c.notes ? c.notes.slice(0, 60) + (c.notes.length > 60 ? "…" : "") : STAGES[c.stage].label}</div>
               </div>
               <span style={{ fontSize: 11, fontFamily: MONO, color: C.amber, whiteSpace: "nowrap" }}>{fmtDate(c.followUp)}</span>
@@ -1055,7 +1134,6 @@ function GhostBtn({ onClick, children }) { return <button onClick={onClick} styl
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
 function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 12 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 5 }}>{label}</span>{children}</label>; }
 const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
-function navBtn(d) { return { fontSize: 14, width: 34, height: 34, borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: d ? C.faint : C.ink, cursor: d ? "default" : "pointer", opacity: d ? 0.5 : 1 }; }
 
 function EmptyState({ onImport, onSample }) {
   return (

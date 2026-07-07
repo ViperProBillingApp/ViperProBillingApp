@@ -457,6 +457,7 @@ export default function CRM({ user }) {
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
         <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
+        <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem onClick={() => setModal("emails")}>Emails</MenuItem>
         <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
@@ -484,7 +485,7 @@ export default function CRM({ user }) {
         </div>
 
         <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", "Comms"]].map(([k, t]) => (
+          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Comms"]].map(([k, t]) => (
             <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
           ))}
         </nav>
@@ -527,13 +528,13 @@ export default function CRM({ user }) {
 }
 
 // Left-panel menu button
-function MenuItem({ onClick, children }) {
+function MenuItem({ onClick, active, children }) {
   return (
     <button
       onClick={onClick}
-      onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-      style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: C.ink, background: "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.lineSoft; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
+      style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
     >
       {children}
     </button>
@@ -1130,7 +1131,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 520, height: "100%", overflow: "auto", boxShadow: "-20px 0 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.panel, position: "sticky", top: 0, zIndex: 1 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>{client.name}{client.archivedClient ? " · archived" : ""}</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>{client.company || client.name}{client.archivedClient ? " · archived" : ""}</h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>

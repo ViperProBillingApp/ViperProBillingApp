@@ -6,7 +6,7 @@ process.env.VIPER_DB = "/tmp/viper-check.db";
 fs.rmSync(process.env.VIPER_DB, { force: true });
 
 const { getDb } = await import("../lib/db.js");
-const { hashPassword, verifyPassword, createSession, userForToken, destroySession } = await import("../lib/auth-core.js");
+const { hashPassword, verifyPassword, createSession, userForToken, destroySession, createResetToken, consumeResetToken } = await import("../lib/auth-core.js");
 
 // password hashing
 const h = hashPassword("correct horse");
@@ -29,6 +29,19 @@ assert.strictEqual(userForToken(token), null, "destroyed session must not resolv
 const token2 = createSession(userId);
 db.prepare("UPDATE users SET active = 0 WHERE id = ?").run(userId);
 assert.strictEqual(userForToken(token2), null, "deactivated user must not resolve");
+
+// reset tokens: single-use, and unknown tokens rejected
+db.prepare("UPDATE users SET active = 1 WHERE id = ?").run(userId);
+const reset = createResetToken(userId);
+assert.strictEqual(consumeResetToken("bogus"), null, "unknown reset token must not resolve");
+assert.strictEqual(Number(consumeResetToken(reset)), userId, "valid reset token resolves to user");
+assert.strictEqual(consumeResetToken(reset), null, "reset token must be single-use");
+
+// expired reset token rejected
+const expired = createResetToken(userId);
+const eh = (await import("node:crypto")).createHash("sha256").update(expired).digest("hex");
+db.prepare("UPDATE password_resets SET expires_at = 1 WHERE token_hash = ?").run(eh);
+assert.strictEqual(consumeResetToken(expired), null, "expired reset token must not resolve");
 
 fs.rmSync(process.env.VIPER_DB, { force: true });
 fs.rmSync(process.env.VIPER_DB + "-wal", { force: true });

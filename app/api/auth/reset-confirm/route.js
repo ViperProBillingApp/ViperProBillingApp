@@ -1,0 +1,15 @@
+import { NextResponse } from "next/server";
+import { getDb } from "../../../../lib/db.js";
+import { consumeResetToken, hashPassword, destroyUserSessions } from "../../../../lib/auth.js";
+
+export async function POST(req) {
+  const { token, password } = await req.json().catch(() => ({}));
+  if (!token || !password) return NextResponse.json({ error: "Missing token or password." }, { status: 400 });
+  if (String(password).length < 8) return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
+  const userId = consumeResetToken(String(token));
+  if (!userId) return NextResponse.json({ error: "This reset link is invalid or has expired. Request a new one." }, { status: 400 });
+  const db = getDb();
+  db.prepare("UPDATE users SET hash = ? WHERE id = ?").run(hashPassword(String(password)), userId);
+  destroyUserSessions(userId); // sign out everywhere after a reset
+  return NextResponse.json({ ok: true });
+}

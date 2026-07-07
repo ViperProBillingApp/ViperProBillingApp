@@ -270,7 +270,10 @@ function normalise(r) {
     cadence: CADENCE[r.cadence] ? r.cadence : "monthly",
     currency: SYMBOL[r.currency] ? r.currency : "",
     coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
-    inChargeOver: !!r.inChargeOver,
+    // Field-absent (undefined) means this record predates inChargeOver and was
+    // never explicitly set — infer true from having a ChargeOver ID rather than
+    // silently defaulting to false, so an old cached client state can't wipe it.
+    inChargeOver: r.inChargeOver === undefined ? !!(r.chargeoverId && String(r.chargeoverId).trim()) : !!r.inChargeOver,
     workflowHidden: !!r.workflowHidden,
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
@@ -465,21 +468,20 @@ export default function CRM({ user }) {
 
       <main style={{ flex: 1, minWidth: 0 }}>
       <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
-        <header style={{ marginBottom: 18 }}>
-          <div className="flex flex-wrap items-center justify-between" style={{ gap: 12 }}>
-            <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
-            <div className="flex items-center" style={{ gap: 8 }}>
-              <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
-              <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-              <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
-                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
-              </span>
-            </div>
-          </div>
+        <header style={{ marginBottom: 14 }}>
+          <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
           {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
         </header>
 
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />
+
+        <div className="flex flex-wrap items-center justify-end" style={{ gap: 8, marginBottom: 14 }}>
+          <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
+          <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+          <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
+            {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
+          </span>
+        </div>
 
         <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
           {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", "Comms"]].map(([k, t]) => (
@@ -752,7 +754,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
-          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} options={[["yes", "In ChargeOver"], ["no", "Not in ChargeOver"]]} />
+          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
@@ -1142,26 +1144,26 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             <Field label="Phone"><input style={inputStyle} value={client.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
             <Field label="ChargeOver ID"><input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" /></Field>
             <Field label="Email status">
-              <select style={inputStyle} value={client.emailStatus} onChange={(e) => set({ emailStatus: e.target.value })}>
+              <CompactSelect value={client.emailStatus} onChange={(e) => set({ emailStatus: e.target.value })}>
                 <option value="ok">Deliverable</option><option value="bounced">Bounced</option><option value="undelivered">Undelivered</option>
-              </select>
+              </CompactSelect>
             </Field>
             <Field label="Amount"><input type="number" style={inputStyle} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} /></Field>
             <Field label="Currency">
-              <select style={inputStyle} value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
+              <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
-              </select>
+              </CompactSelect>
             </Field>
             <Field label="Cadence">
-              <select style={inputStyle} value={client.cadence} onChange={(e) => set({ cadence: e.target.value })}>
+              <CompactSelect value={client.cadence} onChange={(e) => set({ cadence: e.target.value })}>
                 {Object.entries(CADENCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
+              </CompactSelect>
             </Field>
             <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={client.billingDay} onChange={(e) => set({ billingDay: Number(e.target.value) })} /></Field>
           </div>
-          <Field label="Segment"><select style={inputStyle} value={client.segment} onChange={(e) => set({ segment: e.target.value })}>{Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
-          <Field label="Billing status (ChargeOver)"><select style={inputStyle} value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
-          <Field label="Workflow stage"><select style={inputStyle} value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</select></Field>
+          <Field label="Segment"><CompactSelect value={client.segment} onChange={(e) => set({ segment: e.target.value })}>{Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
+          <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
+          <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
           <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
 
           {/* Tags */}
@@ -1308,6 +1310,19 @@ function MiniBtn({ solid, onClick, children }) { return <button onClick={onClick
 function SolidBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: "pointer", border: "none", background: C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
+// A select whose box hugs its content instead of stretching full-width, so
+// the dropdown arrow sits right next to the text instead of way out at the
+// edge of a wide box.
+function CompactSelect({ value, onChange, children }) {
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 11px", background: C.panel }}>
+      <select value={value} onChange={onChange} style={{ border: "none", outline: "none", background: "transparent", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", fontSize: 14, color: C.ink, cursor: "pointer" }}>
+        {children}
+      </select>
+      <span style={{ fontSize: 9, color: C.faint, pointerEvents: "none" }}>▾</span>
+    </div>
+  );
+}
 function ToggleSwitch({ checked, onChange, label }) {
   return (
     <label className="flex items-center" style={{ gap: 10, cursor: "pointer", userSelect: "none" }}>

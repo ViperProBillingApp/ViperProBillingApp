@@ -62,7 +62,7 @@ export default function UsersAdmin({ me }) {
           <div>
             <Wordmark size={24} sub={isAdmin ? "User management" : "Your account"} />
             <p style={{ color: C.sub, fontSize: 13, marginTop: 4 }}>
-              Signed in as {me.name || me.email} · {me.role}
+              Signed in as {me.name || me.email} · {me.role === "admin" ? "admin" : "view only"}
             </p>
           </div>
           <div className="flex" style={{ gap: 8 }}>
@@ -159,7 +159,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
           onChange={async (e) => { if (await onCall(`/api/users/${u.id}`, "PATCH", { role: e.target.value })) onChanged(); }}
           style={{ ...inputStyle, width: "auto", padding: "6px 9px", fontSize: 13, background: C.panel, cursor: self ? "default" : "pointer" }}
         >
-          <option value="staff">Staff</option>
+          <option value="staff">View only</option>
           <option value="admin">Admin</option>
         </select>
         <button
@@ -213,7 +213,7 @@ function AddUser({ onCall, onDone }) {
         <Field label="Email"><input style={inputStyle} type="email" value={f.email} onChange={set("email")} /></Field>
         <Field label="Role">
           <select style={{ ...inputStyle, cursor: "pointer" }} value={f.role} onChange={set("role")}>
-            <option value="staff">Staff</option>
+            <option value="staff">View only</option>
             <option value="admin">Admin</option>
           </select>
         </Field>

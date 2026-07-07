@@ -343,6 +343,22 @@ export default function CRM({ user }) {
     }));
   }, [settings.currency]);
 
+  const [sync, setSync] = useState({ busy: false, msg: "" });
+  const syncNow = async () => {
+    setSync({ busy: true, msg: "" });
+    try {
+      const r = await fetch("/api/sync/chargeover", { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setSync({ busy: false, msg: d.error || "Sync failed." }); return; }
+      const sr = await fetch("/api/state");
+      const sd = await sr.json();
+      if (Array.isArray(sd.clients)) setClients(sd.clients.map(normalise));
+      setSync({ busy: false, msg: `ChargeOver synced: ${d.added} added, ${d.updated} updated (${d.customers} customers).` });
+    } catch {
+      setSync({ busy: false, msg: "Sync failed — try again." });
+    }
+  };
+
   if (!loaded) return <div className="flex items-center justify-center" style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.sub }}><span style={{ fontSize: 14 }}>Loading your CRM…</span></div>;
 
   const detail = clients.find((c) => c.id === detailId);
@@ -370,12 +386,14 @@ export default function CRM({ user }) {
             <GhostBtn onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "Account"}</GhostBtn>
             <GhostBtn onClick={() => setModal("add")}>Add client</GhostBtn>
             <GhostBtn onClick={() => setModal("settings")}>Settings</GhostBtn>
+            {user.role === "admin" && <GhostBtn onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</GhostBtn>}
             <GhostBtn onClick={() => exportBackup(clients, settings)}>Backup</GhostBtn>
             <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
               <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
               <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
             </div>
           </div>
+          {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
         </header>
 
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />

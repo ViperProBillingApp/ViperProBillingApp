@@ -15,8 +15,31 @@ assert.ok(!verifyPassword("wrong horse", h), "wrong password must fail");
 assert.ok(!verifyPassword("correct horse", "garbage"), "malformed hash must fail");
 assert.notStrictEqual(hashPassword("x"), hashPassword("x"), "salts must differ");
 
+// ChargeOver merge logic (pure, no DB) — match by id then email, preserve CRM fields
+const { mapCustomer, mergeCustomers } = await import("../lib/chargeover.js");
+{
+  const m = mapCustomer({ customer_id: 42, company: "Acme", bill_contact: { name: "Jo", email: "JO@ACME.com" }, balance: 100 });
+  assert.strictEqual(m.chargeoverId, "42", "maps customer_id");
+  assert.strictEqual(m.email, "JO@ACME.com", "reads nested contact email");
+
+  let st = { clients: [] };
+  let r = mergeCustomers(st, [mapCustomer({ customer_id: 1, company: "A", bill_contact: { email: "a@a.com" } })]);
+  assert.deepStrictEqual([r.added, r.updated], [1, 0], "new customer added");
+
+  r = mergeCustomers({ clients: r.clients }, [mapCustomer({ customer_id: 1, company: "A Renamed", bill_contact: { email: "a@a.com" } })]);
+  assert.deepStrictEqual([r.added, r.updated, r.clients.length], [0, 1, 1], "same id updates, no duplicate");
+  assert.strictEqual(r.clients[0].company, "A Renamed", "identity refreshed on update");
+
+  // match an existing manual client by email; preserve its CRM-only fields
+  st = { clients: [{ id: "x", chargeoverId: "", email: "b@b.com", company: "B", tags: ["vip"], segment: "viper-current" }] };
+  r = mergeCustomers(st, [mapCustomer({ customer_id: 9, company: "B", bill_contact: { email: "B@B.com" } })]);
+  assert.deepStrictEqual([r.added, r.updated], [0, 1], "email match updates existing");
+  assert.strictEqual(r.clients[0].chargeoverId, "9", "backfills chargeoverId");
+  assert.deepStrictEqual(r.clients[0].tags, ["vip"], "CRM-only fields preserved");
+}
+
 if (!process.env.DATABASE_URL) {
-  console.log("auth checks passed (crypto only — set DATABASE_URL to also check sessions/reset tokens)");
+  console.log("auth + sync checks passed (crypto/merge only — set DATABASE_URL to also check sessions/reset tokens)");
   process.exit(0);
 }
 

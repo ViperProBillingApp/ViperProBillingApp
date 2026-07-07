@@ -481,15 +481,47 @@ function Stat({ label, value, sub, accent, small }) {
 }
 
 /* ---------------------------- Clients tab ---------------------------- */
+// A funnel icon that appears when a column filter is active.
+function Funnel({ color }) {
+  return <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden><path d="M3 5h18l-7 8v5l-4 2v-7z" fill={color} /></svg>;
+}
+// A column heading that IS a filter dropdown. Shows a funnel + turns accent-coloured when active.
+function HeaderFilter({ label, value, onChange, options, align = "left" }) {
+  const active = value !== "all";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: align === "right" ? "flex-end" : "flex-start" }}>
+      {active && (
+        <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex" }}>
+          <Funnel color={C.action} />
+        </button>
+      )}
+      <select value={value} onChange={(e) => onChange(e.target.value)} title="Filter this column"
+        style={{ maxWidth: "100%", fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: active ? 700 : 600,
+          color: active ? C.action : C.sub, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: 0,
+          appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlignLast: align === "right" ? "right" : "left" }}>
+        <option value="all">{label}</option>
+        {options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+      </select>
+      <span style={{ fontSize: 8, color: active ? C.action : C.faint, pointerEvents: "none" }}>▾</span>
+    </div>
+  );
+}
+
 function ClientsTab({ clients, settings, onOpen }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
+  const [stage, setStage] = useState("all");
+  const [owed, setOwed] = useState("all");
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const activeCount = [seg, bill, stage, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
+  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setOwed("all"); setQ(""); };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     if (seg !== "all") l = l.filter((c) => c.segment === seg);
     if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
+    if (stage !== "all") l = l.filter((c) => c.stage === stage);
+    if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? periodsBehind(c) >= 1 : periodsBehind(c) === 0));
     if (q.trim()) {
       const k = q.toLowerCase();
       l = l.filter((c) =>
@@ -498,21 +530,28 @@ function ClientsTab({ clients, settings, onOpen }) {
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => periodsBehind(b) - periodsBehind(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, q, showArchived]);
+  }, [clients, seg, bill, stage, owed, q, showArchived]);
+  const totalActive = clients.filter((c) => !c.archivedClient).length;
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
-        <MiniSelect value={seg} onChange={setSeg} options={[["all", "All segments"], ...Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])]} />
-        <MiniSelect value={bill} onChange={setBill} options={[["all", "All billing"], ...Object.entries(BILLING).map(([k, v]) => [k, v.label])]} />
-        <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer" }}>
+        <span style={{ fontSize: 12.5, color: C.sub }}>
+          {list.length} of {totalActive}
+          {activeCount > 0 && <span style={{ color: C.action, fontWeight: 600 }}> · {activeCount} filter{activeCount > 1 ? "s" : ""} active</span>}
+        </span>
+        {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
+        <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search (incl. old emails & ChargeOver ID)"
-          style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, outline: "none", minWidth: 220, marginLeft: "auto" }} />
+          style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
       </div>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600, display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr", gap: 12 }}>
-          <span>Client</span><span>Billing</span><span>Stage</span><span style={{ textAlign: "right" }}>Owed / rate</span>
+        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr", gap: 12, alignItems: "center" }}>
+          <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
+          <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
+          <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+          <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
         </div>
         {list.map((c) => {
           const behind = periodsBehind(c);

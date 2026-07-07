@@ -190,6 +190,16 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
           <button onClick={() => setEditing(true)} style={smallBtn}>Edit</button>
           <button
             onClick={async () => {
+              const d = await onCall(`/api/users/${u.id}/invite`, "POST");
+              if (d) onNotice({ title: `Login setup email sent to ${d.email}.` });
+            }}
+            style={smallBtn}
+            title="Email this user their username and a link to set their password"
+          >
+            Email login
+          </button>
+          <button
+            onClick={async () => {
               const d = await onCall(`/api/users/${u.id}/reset`, "POST");
               if (d) onNotice({ title: `Password reset for ${u.email}.`, detail: d.tempPassword });
             }}

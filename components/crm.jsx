@@ -561,7 +561,7 @@ function ClientsTab({ clients, settings, onOpen }) {
               <div>
                 <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
                   <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color }} />
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.company || c.name}</span>
                   {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
                   {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
                   {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
@@ -791,6 +791,37 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
 }
 
 /* --------------------------- Detail drawer --------------------------- */
+// Live past-charges (invoices) for a client, pulled from ChargeOver on open.
+function PastCharges({ client }) {
+  const [state, setState] = useState({ loading: true, invoices: [], error: "" });
+  useEffect(() => {
+    let alive = true;
+    setState({ loading: true, invoices: [], error: "" });
+    fetch(`/api/chargeover/invoices?co=${encodeURIComponent(client.chargeoverId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setState({ loading: false, invoices: d.invoices || [], error: d.error || "" }); })
+      .catch(() => { if (alive) setState({ loading: false, invoices: [], error: "load" }); });
+    return () => { alive = false; };
+  }, [client.chargeoverId]);
+  return (
+    <Section title="Past charges (ChargeOver)">
+      {state.loading && <div style={{ fontSize: 12, color: C.faint }}>Loading from ChargeOver…</div>}
+      {!state.loading && state.error && <div style={{ fontSize: 12, color: C.faint }}>{state.error === "ChargeOver not connected" ? "Connect ChargeOver to see charges." : "Couldn't load charges — try again."}</div>}
+      {!state.loading && !state.error && state.invoices.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No charges on record.</div>}
+      {state.invoices.map((inv) => (
+        <div key={inv.id} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "6px 0", borderBottom: `1px solid ${C.lineSoft}`, gap: 8 }}>
+          <span style={{ fontFamily: MONO, color: C.sub }}>{fmtDate(inv.date)} · #{inv.number}</span>
+          <span className="flex items-center" style={{ gap: 8 }}>
+            <MiniPill fg={inv.paid ? C.green : inv.overdue ? C.red : C.amber} bg={inv.paid ? C.greenBg : inv.overdue ? C.redBg : C.amberBg}>{inv.paid ? "paid" : inv.overdue ? "overdue" : "open"}</MiniPill>
+            <span style={{ fontFamily: MONO, fontWeight: 600 }}>{inv.currency}{(inv.total || 0).toLocaleString()}</span>
+          </span>
+        </div>
+      ))}
+      {state.invoices.length > 0 && <div style={{ fontSize: 11, color: C.faint, marginTop: 6 }}>{state.invoices.length} invoice{state.invoices.length > 1 ? "s" : ""} · live from ChargeOver</div>}
+    </Section>
+  );
+}
+
 function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete }) {
   const set = (patch) => onUpdate(client.id, patch);
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
@@ -798,7 +829,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   const [payDate, setPayDate] = useState(iso());
   const [note, setNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [sc, setSc] = useState({ name: "", email: "", role: "" });
+  const [sc, setSc] = useState({ name: "", email: "", phone: "", role: "" });
   const cur = client.currency || settings.currency;
   const behind = periodsBehind(client);
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
@@ -877,21 +908,29 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             )}
           </Section>
 
-          {/* Secondary contacts */}
+          {/* Secondary contacts — additional / supplier contacts with phone */}
           <Section title="Additional contacts">
             {(client.secondaryContacts || []).map((s2, i) => (
-              <div key={i} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
-                <span><strong>{s2.name}</strong> · <span style={{ fontFamily: MONO, color: C.sub }}>{s2.email}</span>{s2.role ? ` · ${s2.role}` : ""}</span>
+              <div key={i} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}`, gap: 8 }}>
+                <span style={{ minWidth: 0 }}>
+                  <strong>{s2.name || "—"}</strong>
+                  {s2.email ? <> · <span style={{ fontFamily: MONO, color: C.sub }}>{s2.email}</span></> : null}
+                  {s2.phone ? <> · <span style={{ fontFamily: MONO, color: C.sub }}>{s2.phone}</span></> : null}
+                  {s2.role ? ` · ${s2.role}` : ""}
+                </span>
                 <button onClick={() => set({ secondaryContacts: client.secondaryContacts.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: C.faint, cursor: "pointer" }}>✕</button>
               </div>
             ))}
             <div className="flex items-end" style={{ gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-              <input style={{ ...inputStyle, flex: 1, minWidth: 90 }} placeholder="Name" value={sc.name} onChange={(e) => setSc({ ...sc, name: e.target.value })} />
-              <input style={{ ...inputStyle, flex: 1.4, minWidth: 130 }} placeholder="Email" value={sc.email} onChange={(e) => setSc({ ...sc, email: e.target.value })} />
-              <input style={{ ...inputStyle, flex: 1, minWidth: 80 }} placeholder="Role" value={sc.role} onChange={(e) => setSc({ ...sc, role: e.target.value })} />
-              <GhostBtn onClick={() => { if (sc.name || sc.email) { set({ secondaryContacts: [...(client.secondaryContacts || []), sc] }); setSc({ name: "", email: "", role: "" }); } }}>Add</GhostBtn>
+              <input style={{ ...inputStyle, flex: 1, minWidth: 80 }} placeholder="Name" value={sc.name} onChange={(e) => setSc({ ...sc, name: e.target.value })} />
+              <input style={{ ...inputStyle, flex: 1.3, minWidth: 120 }} placeholder="Email" value={sc.email} onChange={(e) => setSc({ ...sc, email: e.target.value })} />
+              <input style={{ ...inputStyle, flex: 1, minWidth: 100 }} placeholder="Phone" value={sc.phone} onChange={(e) => setSc({ ...sc, phone: e.target.value })} />
+              <input style={{ ...inputStyle, flex: 0.8, minWidth: 70 }} placeholder="Role" value={sc.role} onChange={(e) => setSc({ ...sc, role: e.target.value })} />
+              <GhostBtn onClick={() => { if (sc.name || sc.email || sc.phone) { set({ secondaryContacts: [...(client.secondaryContacts || []), sc] }); setSc({ name: "", email: "", phone: "", role: "" }); } }}>Add</GhostBtn>
             </div>
           </Section>
+
+          {client.chargeoverId && <PastCharges client={client} />}
 
           {/* Sent comms */}
           {sentComms.length > 0 && (

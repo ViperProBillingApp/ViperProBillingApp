@@ -114,6 +114,7 @@ export default function UsersAdmin({ me }) {
 function StaffCard({ u, self, onCall, onChanged, onNotice }) {
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const [f, setF] = useState({ name: u.name, email: u.email, password: "" });
 
   const smallBtn = {
@@ -150,7 +151,23 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
       <div style={{ fontWeight: 700, fontSize: 14.5, paddingRight: 28 }}>
         {u.name || "—"}{self && <span style={{ color: C.faint, fontWeight: 500 }}> (you)</span>}
       </div>
-      <div style={{ fontFamily: MONO, fontSize: 12, color: C.sub, marginTop: 2, marginBottom: 12 }}>{u.email}</div>
+      <div style={{ fontFamily: MONO, fontSize: 12, color: C.sub, marginTop: 2, marginBottom: 10 }}>{u.email}</div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12.5, minHeight: 22 }}>
+        <span style={{ color: C.sub, fontWeight: 600 }}>Password</span>
+        {u.visible_password ? (
+          <>
+            <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}`, letterSpacing: showPw ? 0 : 2 }}>
+              {showPw ? u.visible_password : "••••••••"}
+            </code>
+            <button onClick={() => setShowPw((v) => !v)} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
+              {showPw ? "Hide" : "Show"}
+            </button>
+          </>
+        ) : (
+          <span style={{ color: C.faint }} title="This user set their own password, so it can't be shown. Use Reset password to assign a new visible one.">set by user — Reset to reveal</span>
+        )}
+      </div>
 
       <div className="flex items-center flex-wrap" style={{ gap: 8, marginBottom: 12 }}>
         <select

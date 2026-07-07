@@ -254,9 +254,6 @@ function exportCsv(clients) {
   }).join(","));
   download(`viper-clients-${iso()}.csv`, [cols.join(","), ...rows].join("\n"), "text/csv");
 }
-function exportBackup(clients, settings) {
-  download(`viper-crm-backup-${iso()}.json`, JSON.stringify({ exportedAt: new Date().toISOString(), settings, clients }, null, 2), "application/json");
-}
 
 /* =============================== App =============================== */
 export default function CRM({ user }) {
@@ -267,6 +264,18 @@ export default function CRM({ user }) {
   const [tab, setTab] = useState("digest");
   const [modal, setModal] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [composeId, setComposeId] = useState(null);
+
+  // shared by the Comms tab and the per-row email compose dialog
+  const logSent = useCallback((id, key, patch, label) => {
+    setClients((p) => p.map((c) => {
+      if (c.id !== id) return c;
+      const reminders = { ...(c.reminders || {}) };
+      reminders[key] = { ...(reminders[key] || {}), ...patch };
+      const activity = patch.sentAt ? logActivity(c, "email", `${label} marked sent`) : c.activity;
+      return { ...c, reminders, activity };
+    }));
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -362,35 +371,34 @@ export default function CRM({ user }) {
   if (!loaded) return <div className="flex items-center justify-center" style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.sub }}><span style={{ fontSize: 14 }}>Loading your CRM…</span></div>;
 
   const detail = clients.find((c) => c.id === detailId);
+  const compose = clients.find((c) => c.id === composeId);
 
   return (
-    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.ink }}>
+    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.ink, display: "flex" }}>
+      {/* Left navigation panel */}
+      <aside style={{ width: 216, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.line}`, padding: "22px 14px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+        <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
+        <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
+        <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
+        <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
+        {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
+        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
+          <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
+          <MenuItem onClick={logout}>Sign out</MenuItem>
+        </div>
+      </aside>
+
+      <main style={{ flex: 1, minWidth: 0 }}>
       <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
         <header style={{ marginBottom: 18 }}>
           <div className="flex flex-wrap items-center justify-between" style={{ gap: 12 }}>
-            <div>
-              <Wordmark size={24} sub="Client Billing CRM" />
-              <p style={{ color: C.sub, fontSize: 13, marginTop: 6 }}>
-                VIP Event Resources · theviperpro.com · <span style={{ fontFamily: MONO }}>{monthName()}</span>
-              </p>
-            </div>
-            <div className="flex items-center" style={{ gap: 10 }}>
-              <span style={{ fontSize: 12.5, color: C.sub }}>{user.name || user.email}</span>
-              <GhostBtn onClick={logout}>Sign out</GhostBtn>
+            <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
+            <div className="flex items-center" style={{ gap: 8 }}>
+              <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
               </span>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center" style={{ gap: 8, marginTop: 14 }}>
-            <GhostBtn onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "Account"}</GhostBtn>
-            <GhostBtn onClick={() => setModal("add")}>Add client</GhostBtn>
-            <GhostBtn onClick={() => setModal("settings")}>Settings</GhostBtn>
-            {user.role === "admin" && <GhostBtn onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</GhostBtn>}
-            <GhostBtn onClick={() => exportBackup(clients, settings)}>Backup</GhostBtn>
-            <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
-              <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
-              <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
             </div>
           </div>
           {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
@@ -408,36 +416,71 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} onOpen={setDetailId} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} onOpen={setDetailId} onEmail={setComposeId} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} onLogSent={(id, key, patch, label) => {
-              setClients((p) => p.map((c) => {
-                if (c.id !== id) return c;
-                const reminders = { ...(c.reminders || {}) };
-                reminders[key] = { ...(reminders[key] || {}), ...patch };
-                const activity = patch.sentAt ? logActivity(c, "email", `${label} marked sent`) : c.activity;
-                return { ...c, reminders, activity };
-              }));
-            }} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} onLogSent={logSent} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
 
         <p style={{ color: C.faint, fontSize: 12, marginTop: 16, lineHeight: 1.5 }}>
           Billing status and payments sync from ChargeOver in production (match key: ChargeOver ID, falling back to email).
-          Reminders escalate automatically with periods behind. Export regularly — CSV for spreadsheets, Backup for a full restore file.
+          Reminders escalate automatically with periods behind. Export to CSV regularly for a spreadsheet copy.
         </p>
         <p style={{ color: C.faint, fontSize: 11.5, marginTop: 10, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
           © 2026 ViperPro · VIP Event Resources · Software solutions for DMCs and the Meetings & Events industry · sales@vipeventresources.com · +1 435 901 2634
         </p>
       </div>
+      </main>
 
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }} />}
+      {compose && <ComposeModal client={compose} settings={settings} onClose={() => setComposeId(null)} onLogSent={logSent} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
     </div>
+  );
+}
+
+// Left-panel menu button
+function MenuItem({ onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: C.ink, background: "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// Per-client email compose dialog (opened from the list's email button).
+function ComposeModal({ client, settings, onClose, onLogSent }) {
+  const [type, setType] = useState("reminder");
+  const [copied, setCopied] = useState(false);
+  const key = `${type}:${periodKey()}`;
+  const saved = (client.reminders && client.reminders[key]) || {};
+  const subject = saved.subject ?? COMMS[type].subject(client, settings);
+  const body = saved.body ?? COMMS[type].body(client, settings);
+  const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  return (
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
+      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(COMMS).map(([k, v]) => [k, v.label])} /></Field>
+      <Field label="To"><div style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8 }}>{client.email || "No email on file — add one first"}</div></Field>
+      <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8 }}>{FROM_EMAIL}</div></Field>
+      <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
+      <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+        <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy for Brevo"}</GhostBtn>
+        <button onClick={() => onLogSent(client.id, key, { sentAt: new Date().toISOString() }, COMMS[type].label)} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer" }}>
+          {saved.sentAt ? "Marked sent ✓" : "Mark sent"}
+        </button>
+        {saved.sentAt && <span style={{ fontSize: 12, color: C.green }}>Sent {fmtDate(saved.sentAt)}</span>}
+      </div>
+    </Modal>
   );
 }
 
@@ -507,7 +550,7 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
   );
 }
 
-function ClientsTab({ clients, settings, onOpen }) {
+function ClientsTab({ clients, settings, onOpen, onEmail }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
@@ -547,20 +590,21 @@ function ClientsTab({ clients, settings, onOpen }) {
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
       </div>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr", gap: 12, alignItems: "center" }}>
+        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr 40px", gap: 12, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
+          <span />
         </div>
         {list.map((c) => {
           const behind = periodsBehind(c);
           const cur = c.currency || settings.currency;
           return (
-            <button key={c.id} onClick={() => onOpen(c.id)} style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr", gap: 12, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
-              <div>
+            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr 40px", gap: 12, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+              <div style={{ minWidth: 0 }}>
                 <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color }} />
+                  <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{c.company || c.name}</span>
                   {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
                   {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
@@ -576,7 +620,14 @@ function ClientsTab({ clients, settings, onOpen }) {
                   : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
                 <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>
               </div>
-            </button>
+              <div style={{ textAlign: "right" }}>
+                <button onClick={(e) => { e.stopPropagation(); onEmail(c.id); }} title="Email this client" aria-label={`Email ${c.company || c.name}`}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+                </button>
+              </div>
+            </div>
           );
         })}
         {list.length === 0 && <div style={{ padding: 32, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}

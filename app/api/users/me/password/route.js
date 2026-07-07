@@ -12,6 +12,7 @@ export async function POST(req) {
     return NextResponse.json({ error: "Current password is incorrect." }, { status: 401 });
   }
   const db = await getDb();
-  await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(String(next)), me.id]);
+  // self-set — admin's visible copy is now stale, drop it
+  await db.query("UPDATE users SET hash = $1, visible_password = NULL WHERE id = $2", [hashPassword(String(next)), me.id]);
   return NextResponse.json({ ok: true });
 }

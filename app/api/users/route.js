@@ -14,7 +14,7 @@ export async function GET() {
   if (err) return err;
   const db = await getDb();
   const { rows } = await db.query(
-    "SELECT id, email, name, role, active, created_at FROM users ORDER BY created_at"
+    "SELECT id, email, name, role, active, created_at, visible_password FROM users ORDER BY created_at"
   );
   return NextResponse.json({ users: rows });
 }
@@ -35,8 +35,8 @@ export async function POST(req) {
   const db = await getDb();
   try {
     const { rows } = await db.query(
-      "INSERT INTO users (email, name, hash, role) VALUES ($1, $2, $3, $4) RETURNING id",
-      [email, String(body.name || "").trim(), hashPassword(password), role]
+      "INSERT INTO users (email, name, hash, role, visible_password) VALUES ($1, $2, $3, $4, $5) RETURNING id",
+      [email, String(body.name || "").trim(), hashPassword(password), role, password]
     );
     return NextResponse.json({
       user: { id: rows[0].id, email, name: body.name || "", role, active: true },

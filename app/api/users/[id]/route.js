@@ -38,7 +38,7 @@ export async function PATCH(req, { params }) {
   }
   if (body.password !== undefined && body.password !== "") {
     if (String(body.password).length < 8) return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
-    await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(String(body.password)), userId]);
+    await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(String(body.password)), String(body.password), userId]);
     if (userId !== me.id) await destroyUserSessions(userId); // new password = their old sessions end
   }
   if (body.role !== undefined) {

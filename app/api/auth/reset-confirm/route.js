@@ -9,7 +9,8 @@ export async function POST(req) {
   const userId = await consumeResetToken(String(token));
   if (!userId) return NextResponse.json({ error: "This reset link is invalid or has expired. Request a new one." }, { status: 400 });
   const db = await getDb();
-  await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(String(password)), userId]);
+  // user set this themselves via the link — admin's visible copy is now stale
+  await db.query("UPDATE users SET hash = $1, visible_password = NULL WHERE id = $2", [hashPassword(String(password)), userId]);
   await destroyUserSessions(userId); // sign out everywhere after a reset
   return NextResponse.json({ ok: true });
 }

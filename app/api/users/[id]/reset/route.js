@@ -14,7 +14,7 @@ export async function POST(req, { params }) {
   if (!rows[0]) return NextResponse.json({ error: "User not found." }, { status: 404 });
 
   const tempPassword = generatePassword();
-  await db.query("UPDATE users SET hash = $1 WHERE id = $2", [hashPassword(tempPassword), userId]);
+  await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(tempPassword), tempPassword, userId]);
   await destroyUserSessions(userId);
   // shown once to the admin; hand it to the user and have them change it
   return NextResponse.json({ tempPassword });

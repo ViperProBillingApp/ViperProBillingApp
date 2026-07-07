@@ -1,8 +1,8 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "ViperPro · Client CRM",
-  description: "Client CRM and collections for VIP Event Resources",
+  title: "ViperPro · Client Billing CRM",
+  description: "Client Billing CRM and collections for VIP Event Resources",
 };
 
 export default function RootLayout({ children }) {

@@ -68,7 +68,7 @@ export default function LoginForm() {
         <div style={{ textAlign: "center", marginBottom: 22 }}>
           <Wordmark size={34} />
           <p style={{ color: C.sub, fontSize: 14, marginTop: 8 }}>
-            {mode === "signin" ? "Client CRM · staff sign in" : "Reset your password"}
+            {mode === "signin" ? "Client Billing CRM · staff sign in" : "Reset your password"}
           </p>
         </div>
 

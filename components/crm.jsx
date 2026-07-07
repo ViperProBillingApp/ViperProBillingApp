@@ -369,7 +369,7 @@ export default function CRM({ user }) {
         <header style={{ marginBottom: 18 }}>
           <div className="flex flex-wrap items-center justify-between" style={{ gap: 12 }}>
             <div>
-              <Wordmark size={24} sub="Client CRM" />
+              <Wordmark size={24} sub="Client Billing CRM" />
               <p style={{ color: C.sub, fontSize: 13, marginTop: 6 }}>
                 VIP Event Resources · theviperpro.com · <span style={{ fontFamily: MONO }}>{monthName()}</span>
               </p>

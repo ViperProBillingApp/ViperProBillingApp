@@ -1,0 +1,33 @@
+# Render Blueprint — publish the ViperPro CRM with one connect.
+# Render → New → Blueprint → connect ViperProBillingApp/ViperProBillingApp.
+# The disk keeps the SQLite database (data + users) across deploys.
+services:
+  - type: web
+    name: viper-crm
+    runtime: node
+    plan: starter # Starter ($7/mo) is required for a persistent disk; Free has none
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /login
+    disk:
+      name: viper-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: VIPER_DB
+        value: /data/viper.db
+      - key: CHARGEOVER_SUBDOMAIN
+        value: vipeventresources
+      # Fill these in the Render dashboard after the first deploy (kept out of git):
+      - key: APP_URL # your Render URL, e.g. https://viper-crm.onrender.com
+        sync: false
+      - key: BREVO_WEBHOOK_SECRET # from .env.local
+        sync: false
+      - key: BREVO_API_KEY # Brevo transactional (v3) key — enables password-reset emails
+        sync: false
+      - key: ANTHROPIC_API_KEY # enables the contact-recovery lookup
+        sync: false
+      - key: CHARGEOVER_API_KEY
+        sync: false

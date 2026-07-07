@@ -86,23 +86,40 @@ function periodsBehind(c, now = new Date()) {
   if (now.getDate() < day) diff -= 1; // current period not yet due if we're before the billing day
   return Math.max(0, Math.min(24, Math.floor(diff / cad)));
 }
-function totalOwed(c, now = new Date()) { return periodsBehind(c, now) * (Number(c.amount) || 0); }
+// Real ChargeOver balance beats the calendar-based guess whenever we have one —
+// dividing it by the recorded rate gives "how many periods' worth is owed"
+// without depending on billingDay/lastPaid bookkeeping being accurate. This is
+// what makes "final notice" and "total owed" trustworthy for synced clients.
+function arrearsPeriods(c, now = new Date()) {
+  if (c.coBalance != null && Number(c.amount) > 0) {
+    if (c.coBalance <= 0) return 0;
+    return Math.max(1, Math.min(24, Math.round(c.coBalance / Number(c.amount))));
+  }
+  return periodsBehind(c, now);
+}
+function totalOwed(c, now = new Date()) {
+  if (c.coBalance != null) return Math.max(0, c.coBalance);
+  return periodsBehind(c, now) * (Number(c.amount) || 0);
+}
 // Who needs a payment reminder. periodsBehind only works once we know recurring
 // amounts — the ChargeOver billing status is the reliable signal for CSV-imported
 // clients, so either counts.
 function needsReminder(c, now = new Date()) {
   if (["never-charged", "marked-deletion"].includes(c.billingStatus) || c.stage === "marked-deletion") return false;
-  return periodsBehind(c, now) >= 1 || ["not-up-to-date", "payment-failed"].includes(c.billingStatus);
+  return arrearsPeriods(c, now) >= 1 || ["not-up-to-date", "payment-failed"].includes(c.billingStatus);
 }
 function escalationOf(c) {
-  const n = periodsBehind(c);
+  const n = arrearsPeriods(c);
   if (n >= 3) return { level: 3, label: "Final notice", color: C.red };
   if (n === 2) return { level: 2, label: "Second reminder", color: C.amber };
   if (n === 1) return { level: 1, label: "Reminder", color: C.amber };
   return null;
 }
 function monthlyValue(c) { return (Number(c.amount) || 0) / (CADENCE[c.cadence]?.months || 1); }
-function followUpDue(c, now = new Date()) { const d = parseDate(c.followUp); return d && d <= now; }
+// Compare calendar dates as "YYYY-MM-DD" strings, not Date objects — a
+// date-only string parses as UTC midnight, which can read as "not due yet"
+// or "already due" depending on the browser's timezone offset from UTC.
+function followUpDue(c, now = new Date()) { return !!c.followUp && c.followUp <= iso(now); }
 function logActivity(c, type, text) {
   return [{ at: new Date().toISOString(), type, text }, ...(c.activity || [])].slice(0, 200);
 }
@@ -125,7 +142,7 @@ const COMMS = {
       const owedN = totalOwed(c);
       // amounts may be unknown (CSV import) — never write "$0" to a client
       const owed = owedN > 0 ? money(owedN, cur) : null;
-      const n = periodsBehind(c);
+      const n = arrearsPeriods(c);
       const e = escalationOf(c);
       if (e?.level === 3) return `Hi ${firstName(c.name)},
 
@@ -199,7 +216,7 @@ function templateTokens(c, s) {
     firstName: firstName(c.name), name: c.name, company: c.company || c.name,
     businessName: s.businessName, monthName: monthName(),
     amount: Number(c.amount) > 0 ? money(c.amount, cur) : "",
-    owed: owedN > 0 ? money(owedN, cur) : "", periods: String(periodsBehind(c)),
+    owed: owedN > 0 ? money(owedN, cur) : "", periods: String(arrearsPeriods(c)),
     cadence: CADENCE[c.cadence]?.label.toLowerCase() || "monthly", signature: SIGNATURE,
   };
 }
@@ -253,6 +270,8 @@ function normalise(r) {
     cadence: CADENCE[r.cadence] ? r.cadence : "monthly",
     currency: SYMBOL[r.currency] ? r.currency : "",
     coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
+    inChargeOver: !!r.inChargeOver,
+    workflowHidden: !!r.workflowHidden,
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -292,7 +311,7 @@ function download(filename, content, mime) {
 function exportCsv(clients) {
   const cols = ["chargeoverId", "name", "company", "email", "phone", "segment", "billingStatus", "stage", "tags", "amount", "currency", "cadence", "billingDay", "lastPaid", "periodsBehind", "totalOwed", "followUp", "notes", "emailStatus"];
   const rows = clients.map((c) => cols.map((k) => {
-    let v = k === "tags" ? c.tags.join("|") : k === "periodsBehind" ? periodsBehind(c) : k === "totalOwed" ? totalOwed(c) : k === "lastPaid" ? (lastPaymentDate(c) ? iso(lastPaymentDate(c)) : "") : c[k] ?? "";
+    let v = k === "tags" ? c.tags.join("|") : k === "periodsBehind" ? arrearsPeriods(c) : k === "totalOwed" ? totalOwed(c) : k === "lastPaid" ? (lastPaymentDate(c) ? iso(lastPaymentDate(c)) : "") : c[k] ?? "";
     v = String(v);
     return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   }).join(","));
@@ -310,7 +329,6 @@ export default function CRM({ user }) {
   const [detailId, setDetailId] = useState(null);
   const [composeId, setComposeId] = useState(null);
   const [composeType, setComposeType] = useState("reminder");
-  const [commsQueue, setCommsQueue] = useState(null); // client ids picked on the Clients tab → Comms
   const [toast, setToast] = useState("");
 
   const templates = useMemo(() => getTemplates(settings), [settings]);
@@ -464,7 +482,7 @@ export default function CRM({ user }) {
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />
 
         <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", `Comms${commsQueue ? ` · ${commsQueue.length}` : ""}`]].map(([k, t]) => (
+          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["recovery", `Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`], ["comms", "Comms"]].map(([k, t]) => (
             <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
           ))}
         </nav>
@@ -473,10 +491,10 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={(id, type) => { setComposeId(id); setComposeType(type || "reminder"); }} onEmailAll={(ids) => { setCommsQueue(ids); setTab("comms"); }} onUpdate={update} onUpdateWithLog={updateWithLog} />}
-            {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={(id, type) => { setComposeId(id); setComposeType(type || "reminder"); }} onUpdate={update} onUpdateWithLog={updateWithLog} />}
+            {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} queue={commsQueue} onClearQueue={() => setCommsQueue(null)} onOpen={setDetailId} onSent={showToast} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -584,7 +602,7 @@ function ComposeModal({ client, settings, templates, initialType, onClose, onLog
 /* ---------------------------- Stat strip ---------------------------- */
 function StatStrip({ clients, settings, bounced }) {
   const s = useMemo(() => {
-    const owedByCur = {}; let overdue = 0, mrr = 0, notUpToDate = 0, followUps = 0, synced = 0;
+    const owedByCur = {}; let overdue = 0, mrr = 0, mrrKnown = 0, notUpToDate = 0, followUps = 0, synced = 0;
     const now = new Date();
     for (const c of clients) {
       const cur = c.currency || settings.currency;
@@ -598,18 +616,21 @@ function StatStrip({ clients, settings, bounced }) {
         const behind = periodsBehind(c, now);
         if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
       }
-      if (!["marked-deletion", "never-charged"].includes(c.billingStatus) && c.stage !== "marked-deletion") mrr += monthlyValue(c);
+      if (!["marked-deletion", "never-charged"].includes(c.billingStatus) && c.stage !== "marked-deletion") {
+        mrr += monthlyValue(c);
+        if (Number(c.amount) > 0) mrrKnown++;
+      }
       if (["not-up-to-date", "payment-failed"].includes(c.billingStatus)) notUpToDate++;
       if (followUpDue(c, now)) followUps++;
     }
     const owedStr = Object.entries(owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
-    return { owedStr, overdue, mrr, notUpToDate, followUps, synced, total: clients.length };
+    return { owedStr, overdue, mrr, mrrKnown, notUpToDate, followUps, synced, total: clients.length };
   }, [clients, settings.currency]);
   return (
-    <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 18 }}>
+    <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
       <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
-      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} clients in arrears (run Sync ChargeOver)`} accent={C.red} small={s.owedStr.length > 12} />
-      <Stat label="Monthly Recurring Revenue (active)" value={money(Math.round(s.mrr), settings.currency)} sub="from recorded amounts" accent={C.green} />
+      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} />
+      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} />
       <Stat label="Follow-ups due" value={String(s.followUps)} sub="scheduled to chase today" accent={s.followUps ? C.amber : C.green} />
       <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} />
     </section>
@@ -617,13 +638,13 @@ function StatStrip({ clients, settings, bounced }) {
 }
 function Stat({ label, value, sub, accent, small }) {
   return (
-    <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: "13px 15px" }}>
-      <div className="flex items-center" style={{ gap: 7, marginBottom: 7 }}>
-        <span style={{ width: 6, height: 6, borderRadius: 6, background: accent }} />
-        <span style={{ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
+    <div style={{ background: C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "8px 10px" }}>
+      <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
+        <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0 }} />
+        <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
       </div>
-      <div style={{ fontSize: small ? 15 : 21, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.3 }}>{value}</div>
-      <div style={{ fontSize: 11.5, color: C.faint, marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25 }}>{value}</div>
+      <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
     </div>
   );
 }
@@ -684,21 +705,23 @@ function EmailIconMenu({ client, templates, onPick }) {
   );
 }
 
-function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll, onUpdate, onUpdateWithLog }) {
+function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
+  const [co, setCo] = useState("all");
   const [owed, setOwed] = useState("all");
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-  const activeCount = [seg, bill, stage, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
-  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setOwed("all"); setQ(""); };
+  const activeCount = [seg, bill, stage, co, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
+  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setOwed("all"); setQ(""); };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     if (seg !== "all") l = l.filter((c) => c.segment === seg);
     if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
     if (stage !== "all") l = l.filter((c) => c.stage === stage);
-    if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? periodsBehind(c) >= 1 : periodsBehind(c) === 0));
+    if (co !== "all") l = l.filter((c) => (co === "yes" ? !!c.inChargeOver : !c.inChargeOver));
+    if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0));
     if (q.trim()) {
       const k = q.toLowerCase();
       l = l.filter((c) =>
@@ -706,9 +729,10 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll,
         (c.company || "").toLowerCase().includes(k) || (c.chargeoverId || "").toLowerCase().includes(k) ||
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
-    return [...l].sort((a, b) => periodsBehind(b) - periodsBehind(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, owed, q, showArchived]);
+    return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
+  }, [clients, seg, bill, stage, co, owed, q, showArchived]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
+  const gridCols = "1.4fr 1.2fr 0.85fr 0.85fr 0.85fr 40px";
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -717,9 +741,6 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll,
           {activeCount > 0 && <span style={{ color: C.action, fontWeight: 600 }}> · {activeCount} filter{activeCount > 1 ? "s" : ""} active</span>}
         </span>
         {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
-        {list.length > 0 && !showArchived && (
-          <MiniBtn onClick={() => onEmailAll(list.map((c) => c.id))}>✉ Email these {list.length}</MiniBtn>
-        )}
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
@@ -727,18 +748,19 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll,
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
       </div>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr 40px", gap: 12, alignItems: "center" }}>
+        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 12, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} options={[["yes", "In ChargeOver"], ["no", "Not in ChargeOver"]]} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
         {list.map((c) => {
-          const behind = periodsBehind(c);
+          const behind = arrearsPeriods(c);
           const cur = c.currency || settings.currency;
           return (
-            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: "1.5fr 1.3fr 0.9fr 0.9fr 40px", gap: 12, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 12, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
               <div style={{ minWidth: 0 }}>
                 <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
                   <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
@@ -761,9 +783,17 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll,
                   {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
                 </select>
               </div>
+              <div className="flex items-center" style={{ gap: 6, minWidth: 0 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 6, background: c.inChargeOver ? C.green : C.faint, flexShrink: 0 }} />
+                <select value={c.inChargeOver ? "yes" : "no"} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { inChargeOver: e.target.value === "yes" })}
+                  title="In ChargeOver" style={{ fontSize: 12, fontWeight: 600, color: c.inChargeOver ? C.green : C.faint, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
+                  <option value="yes">In ChargeOver</option>
+                  <option value="no">Not in ChargeOver</option>
+                </select>
+              </div>
               <div style={{ textAlign: "right" }}>
                 {behind >= 1
-                  ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(behind * c.amount, cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
+                  ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
                   : needsReminder(c)
                     ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
                     : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
@@ -782,37 +812,72 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onEmailAll,
 }
 
 /* --------------------------- Workflow tab --------------------------- */
-function WorkflowTab({ clients, onOpen, onStage }) {
+function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
+  const [showHidden, setShowHidden] = useState(false);
+  const [dragOverStage, setDragOverStage] = useState(null);
+  const hiddenCount = clients.filter((c) => c.workflowHidden).length;
+  const visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden));
+
+  const drop = (e, stage) => {
+    e.preventDefault();
+    setDragOverStage(null);
+    const id = e.dataTransfer.getData("text/plain");
+    if (id) onStage(id, stage);
+  };
+
   return (
-    <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
-      {STAGE_ORDER.map((stage) => {
-        const col = clients.filter((c) => c.stage === stage);
-        return (
-          <div key={stage} style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-            <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 7 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 8, background: STAGES[stage].color }} />
-              <span style={{ fontSize: 12.5, fontWeight: 700 }}>{STAGES[stage].label}</span>
-              <span style={{ fontSize: 11, color: C.faint, marginLeft: "auto", fontFamily: MONO }}>{col.length}</span>
+    <div>
+      {(hiddenCount > 0 || showHidden) && (
+        <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginBottom: 12, width: "fit-content" }}>
+          <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+          {showHidden ? `Showing ${hiddenCount} removed from workflow` : `${hiddenCount} removed from workflow — show`}
+        </label>
+      )}
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
+        {STAGE_ORDER.map((stage) => {
+          const col = visible.filter((c) => c.stage === stage);
+          return (
+            <div key={stage}
+              onDragOver={(e) => { e.preventDefault(); if (dragOverStage !== stage) setDragOverStage(stage); }}
+              onDragLeave={() => setDragOverStage((s) => (s === stage ? null : s))}
+              onDrop={(e) => drop(e, stage)}
+              style={{ background: C.panel, borderRadius: 12, border: `1px solid ${dragOverStage === stage ? C.action : C.line}`, overflow: "hidden" }}>
+              <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 8, background: STAGES[stage].color }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700 }}>{STAGES[stage].label}</span>
+                <span style={{ fontSize: 11, color: C.faint, marginLeft: "auto", fontFamily: MONO }}>{col.length}</span>
+              </div>
+              <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
+                {col.map((c) => (
+                  <div key={c.id} draggable={!showHidden} onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
+                    style={{ position: "relative", background: C.paper, borderRadius: 8, padding: "8px 10px", border: `1px solid ${followUpDue(c) ? C.amber : C.line}`, cursor: showHidden ? "default" : "grab" }}>
+                    <button
+                      onClick={() => onUpdate(c.id, { workflowHidden: !showHidden })}
+                      title={showHidden ? "Add back to workflow" : "Remove from workflow"}
+                      aria-label={showHidden ? "Add back to workflow" : "Remove from workflow"}
+                      style={{ position: "absolute", top: 4, right: 4, background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer", lineHeight: 1, padding: 4, borderRadius: 6 }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                      {showHidden ? "↺" : "✕"}
+                    </button>
+                    <button onClick={() => onOpen(c.id)} style={{ background: "none", border: "none", padding: 0, paddingRight: 16, cursor: "pointer", textAlign: "left", width: "100%" }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
+                      <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{arrearsPeriods(c) ? ` · ${arrearsPeriods(c)}p behind` : ""}</div>
+                      {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
+                    </button>
+                    {!showHidden && (
+                      <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
+                        style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 6px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.sub, cursor: "pointer" }}>
+                        {STAGE_ORDER.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
+                      </select>
+                    )}
+                  </div>
+                ))}
+                {col.length === 0 && <div style={{ fontSize: 11, color: C.faint, textAlign: "center", padding: "8px 0" }}>—</div>}
+              </div>
             </div>
-            <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 40 }}>
-              {col.map((c) => (
-                <div key={c.id} style={{ background: C.paper, borderRadius: 8, padding: "8px 10px", border: `1px solid ${followUpDue(c) ? C.amber : C.line}` }}>
-                  <button onClick={() => onOpen(c.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left", width: "100%" }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
-                    <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{periodsBehind(c) ? ` · ${periodsBehind(c)}p behind` : ""}</div>
-                    {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
-                  </button>
-                  <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
-                    style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 6px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.sub, cursor: "pointer" }}>
-                    {STAGE_ORDER.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
-                  </select>
-                </div>
-              ))}
-              {col.length === 0 && <div style={{ fontSize: 11, color: C.faint, textAlign: "center", padding: "8px 0" }}>—</div>}
-            </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -869,33 +934,29 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 }
 
 /* ----------------------------- Comms tab ----------------------------- */
-// Queue + editor. WHO to email is decided on the Clients tab (its status
-// filters + "Email these N") or falls out of the template's natural audience —
-// no duplicate status filters here. Sent/unsent state is visible per recipient,
-// and sending auto-advances to the next unsent.
-function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue, onOpen, onSent }) {
+// Queue + editor. WHO to email falls out of the template's natural audience.
+// Sent/unsent state is visible per recipient, and sending auto-advances to
+// the next unsent.
+function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
   const key = `${type}:${periodKey()}`;
 
   const [audience, skipped] = useMemo(() => {
     let l;
-    if (queue) {
-      const byId = new Map(clients.map((c) => [c.id, c]));
-      l = queue.map((id) => byId.get(id)).filter(Boolean);
-    } else if (type === "deletion") {
+    if (type === "deletion") {
       l = clients.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
     } else {
       l = clients.filter((c) => c.stage !== "marked-deletion");
-      if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => periodsBehind(b) - periodsBehind(a));
+      if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a));
       if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
     }
     const before = l.length;
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
     return [l, before - l.length];
-  }, [clients, type, queue]);
+  }, [clients, type]);
 
-  useEffect(() => { setSelId(null); }, [type, queue]);
+  useEffect(() => { setSelId(null); }, [type]);
   const sentOf = (c) => c.reminders?.[key]?.sentAt;
   const client = audience.find((c) => c.id === selId) || audience.find((c) => !sentOf(c)) || audience[0];
   const sentCount = audience.filter(sentOf).length;
@@ -917,14 +978,7 @@ function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
         <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
-        {queue ? (
-          <span className="flex items-center" style={{ gap: 8, fontSize: 12.5, color: C.action, fontWeight: 600, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 20, padding: "6px 12px" }}>
-            Your selection from Clients · {audience.length}
-            <button onClick={onClearQueue} title="Back to the template's automatic audience" style={{ background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 12, padding: 0 }}>✕ clear</button>
-          </span>
-        ) : (
-          <span style={{ fontSize: 12.5, color: C.sub }}>Audience: {audienceHint} — or pick exactly who on the Clients tab → “Email these”.</span>
-        )}
+        <span style={{ fontSize: 12.5, color: C.sub }}>Audience: {audienceHint}</span>
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
           {sentCount}/{audience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
         </span>
@@ -940,7 +994,7 @@ function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue
             {audience.map((c) => {
               const sent = sentOf(c);
               const on = c.id === client.id;
-              const behind = periodsBehind(c);
+              const behind = arrearsPeriods(c);
               return (
                 <button key={c.id} onClick={() => setSelId(c.id)}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, borderLeft: `3px solid ${on ? C.action : "transparent"}`, background: on ? C.lineSoft : "transparent" }}>
@@ -962,7 +1016,7 @@ function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue
                 <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink, textDecoration: "underline", textDecorationColor: C.lineSoft, textUnderlineOffset: 3 }}>
                   {client.company || client.name}
                 </button>
-                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {periodsBehind(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
+                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
               </div>
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
@@ -978,7 +1032,7 @@ function CommsTab({ clients, settings, templates, onLogSent, queue, onClearQueue
 function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const now = new Date();
   const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
-  const finals = reminderList.filter((c) => periodsBehind(c, now) >= 3);
+  const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
   const followUps = clients.filter((c) => followUpDue(c, now));
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
@@ -1066,7 +1120,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sc, setSc] = useState({ name: "", email: "", phone: "", role: "" });
   const cur = client.currency || settings.currency;
-  const behind = periodsBehind(client);
+  const behind = arrearsPeriods(client);
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
 
   return (
@@ -1254,6 +1308,16 @@ function MiniBtn({ solid, onClick, children }) { return <button onClick={onClick
 function SolidBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: "pointer", border: "none", background: C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
+function ToggleSwitch({ checked, onChange, label }) {
+  return (
+    <label className="flex items-center" style={{ gap: 10, cursor: "pointer", userSelect: "none" }}>
+      <span onClick={() => onChange(!checked)} style={{ position: "relative", width: 36, height: 20, borderRadius: 20, background: checked ? C.action : C.line, flexShrink: 0, transition: "background 0.15s" }}>
+        <span style={{ position: "absolute", top: 2, left: checked ? 18 : 2, width: 16, height: 16, borderRadius: 16, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.25)", transition: "left 0.15s" }} />
+      </span>
+      {label && <span style={{ fontSize: 13, color: C.ink }}>{label}</span>}
+    </label>
+  );
+}
 function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 12 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 5 }}>{label}</span>{children}</label>; }
 const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
 
@@ -1311,7 +1375,7 @@ function ImportPanel({ onImport, onSample }) {
   );
 }
 function AddPanel({ onAdd }) {
-  const [f, setF] = useState({ name: "", company: "", email: "", chargeoverId: "", segment: "viper-current", billingStatus: "never-charged", amount: "", billingDay: "1", cadence: "monthly", currency: "" });
+  const [f, setF] = useState({ name: "", company: "", email: "", chargeoverId: "", segment: "viper-current", billingStatus: "never-charged", amount: "", billingDay: "1", cadence: "monthly", currency: "", inChargeOver: false });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <div>
@@ -1327,6 +1391,7 @@ function AddPanel({ onAdd }) {
       </div>
       <Field label="Segment"><select style={inputStyle} value={f.segment} onChange={set("segment")}>{Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
       <Field label="Billing status"><select style={inputStyle} value={f.billingStatus} onChange={set("billingStatus")}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
+      <div style={{ margin: "14px 0" }}><ToggleSwitch checked={f.inChargeOver} onChange={(v) => setF({ ...f, inChargeOver: v })} label="Already in ChargeOver" /></div>
       <div className="flex justify-end" style={{ marginTop: 8 }}><SolidBtn onClick={() => onAdd(f)}>Add client</SolidBtn></div>
     </div>
   );

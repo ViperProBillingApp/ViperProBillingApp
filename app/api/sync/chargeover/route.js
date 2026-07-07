@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
-import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers } from "../../../../lib/chargeover.js";
+import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts } from "../../../../lib/chargeover.js";
 
-// Long-ish job; give it room.
+// Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
 
 async function runSync() {
@@ -12,12 +12,13 @@ async function runSync() {
   const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: {} };
   const customers = await fetchAllCustomers();
   const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer));
+  const { filled, remaining } = await backfillRecurringAmounts(clients);
   const next = { clients, settings: state.settings || {} };
   await db.query(
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify(next)]
   );
-  return { ok: true, customers: customers.length, added, updated };
+  return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining };
 }
 
 // Nightly Vercel Cron — authenticated by the CRON_SECRET bearer Vercel injects.

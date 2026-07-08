@@ -1281,12 +1281,12 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           {(client.viperCustomer || client.portalUrl || client.adminUrl || client.portalUser || client.portalPassword) && (
             <Section title="Viper portal access">
               <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Portal URL"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalUrl} onChange={(e) => set({ portalUrl: e.target.value })} placeholder="https://…" /></Field>
-                <Field label="Admin URL"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.adminUrl} onChange={(e) => set({ adminUrl: e.target.value })} placeholder="https://…" /></Field>
-                <Field label="User name"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalUser} onChange={(e) => set({ portalUser: e.target.value })} /></Field>
-                <Field label="Password"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalPassword} onChange={(e) => set({ portalPassword: e.target.value })} /></Field>
+                <CredField label="Portal URL" value={client.portalUrl} onChange={(v) => set({ portalUrl: v })} placeholder="https://…" />
+                <CredField label="Admin URL" value={client.adminUrl} onChange={(v) => set({ adminUrl: v })} placeholder="https://…" />
+                <CredField label="User name" value={client.portalUser} onChange={(v) => set({ portalUser: v })} />
+                <CredField label="Password" value={client.portalPassword} onChange={(v) => set({ portalPassword: v })} />
               </div>
-              <div className="flex" style={{ gap: 8 }}>
+              <div className="flex" style={{ gap: 8, marginTop: 4 }}>
                 {client.portalUrl && <a href={client.portalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
                 {client.adminUrl && <a href={client.adminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
               </div>
@@ -1374,6 +1374,25 @@ function ToggleSwitch({ checked, onChange, label }) {
   );
 }
 function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 12 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 5 }}>{label}</span>{children}</label>; }
+// Editable credential field with a one-tap copy button (copies just this value).
+function CredField({ label, value, onChange, placeholder }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { if (!value) return; navigator.clipboard?.writeText(value).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }); };
+  return (
+    <label style={{ display: "block", marginBottom: 12 }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 5 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
+        <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
+        <button type="button" onClick={copy} title={`Copy ${label.toLowerCase()}`} aria-label={`Copy ${label.toLowerCase()}`} disabled={!value}
+          style={{ flexShrink: 0, width: 36, borderRadius: 8, border: `1px solid ${C.line}`, background: copied ? C.greenBg : C.panel, color: copied ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          {copied
+            ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+            : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
+        </button>
+      </div>
+    </label>
+  );
+}
 const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
 
 function EmptyState({ onImport, onSample }) {

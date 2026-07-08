@@ -368,6 +368,13 @@ export default function CRM({ user }) {
 
   const templates = useMemo(() => getTemplates(settings), [settings]);
 
+  // Signed-in user's signature image — shown in the compose editors; the send
+  // route appends it server-side to every outgoing email.
+  const [signatureImage, setSignatureImage] = useState("");
+  useEffect(() => {
+    fetch("/api/users/me").then((r) => r.json()).then((d) => setSignatureImage(d.user?.signature_image || "")).catch(() => {});
+  }, []);
+
   const showToast = useCallback((msg) => setToast(msg), []);
   useEffect(() => {
     if (!toast) return;
@@ -534,7 +541,7 @@ export default function CRM({ user }) {
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={(id, type) => { setComposeId(id); setComposeType(type || "reminder"); }} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -552,7 +559,7 @@ export default function CRM({ user }) {
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
-      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} />}
+      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
@@ -598,7 +605,7 @@ function MenuItem({ onClick, active, icon, children }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage }) {
   const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
@@ -632,6 +639,15 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
       </div>
       <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
       <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      {/* Sender's signature — appended automatically by the send route */}
+      {signatureImage ? (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 5 }}>Signature · added to the bottom automatically</div>
+          <img src={signatureImage} alt="your email signature" style={{ maxWidth: 260, maxHeight: 72, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 4 }} />
+        </div>
+      ) : (
+        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 12 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
+      )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
         <button onClick={sendNow} disabled={!client.email || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !client.email || send.busy ? C.grey : C.action, color: "#fff", cursor: !client.email || send.busy ? "default" : "pointer" }}>
           {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
@@ -647,12 +663,12 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 
 // Per-client email compose dialog (opened from the list's email icon menu,
 // pre-set to whichever template was picked there).
-function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent }) {
+function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
     <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} />
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} />
     </Modal>
   );
 }
@@ -1012,7 +1028,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 // Queue + editor. WHO to email falls out of the template's natural audience.
 // Sent/unsent state is visible per recipient, and sending auto-advances to
 // the next unsent.
-function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
+function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
   const [q, setQ] = useState("");
@@ -1107,7 +1123,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
               </div>
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} />
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} />
           </div>
         </div>
       )}

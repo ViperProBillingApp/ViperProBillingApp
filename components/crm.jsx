@@ -305,7 +305,10 @@ function normalise(r) {
     archivedContacts: r.archivedContacts || [],
     candidates: r.candidates || [],
     reminders: r.reminders || {},
-    notes: r.notes || "",
+    // Notes are dated cards; a legacy `notes` string migrates into the first card once.
+    noteCards: Array.isArray(r.noteCards) ? r.noteCards
+      : ((r.notes || "").trim() ? [{ id: uid(), at: r.createdAt || iso(), by: "", text: r.notes.trim() }] : []),
+    notes: "",
     followUp: r.followUp || "",
     activity: Array.isArray(r.activity) ? r.activity : [],
     createdAt: r.createdAt || iso(),
@@ -337,7 +340,7 @@ function download(filename, content, mime) {
 function exportCsv(clients) {
   const cols = ["chargeoverId", "name", "company", "email", "phone", "segment", "billingStatus", "stage", "tags", "amount", "currency", "cadence", "billingDay", "lastPaid", "periodsBehind", "totalOwed", "followUp", "notes", "emailStatus"];
   const rows = clients.map((c) => cols.map((k) => {
-    let v = k === "tags" ? c.tags.join("|") : k === "periodsBehind" ? arrearsPeriods(c) : k === "totalOwed" ? totalOwed(c) : k === "lastPaid" ? (lastPaymentDate(c) ? iso(lastPaymentDate(c)) : "") : c[k] ?? "";
+    let v = k === "tags" ? c.tags.join("|") : k === "periodsBehind" ? arrearsPeriods(c) : k === "totalOwed" ? totalOwed(c) : k === "lastPaid" ? (lastPaymentDate(c) ? iso(lastPaymentDate(c)) : "") : k === "notes" ? (c.noteCards || []).map((n) => n.text).join(" | ") : c[k] ?? "";
     v = String(v);
     return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   }).join(","));
@@ -435,7 +438,7 @@ export default function CRM({ user }) {
         const key = clean.chargeoverId || clean.email.toLowerCase();
         if (key && byKey.has(key)) {
           const ex = byKey.get(key);
-          Object.assign(ex, clean, { id: ex.id, reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity, payments: clean.payments.length ? clean.payments : ex.payments, notes: clean.notes || ex.notes });
+          Object.assign(ex, clean, { id: ex.id, reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity, payments: clean.payments.length ? clean.payments : ex.payments, noteCards: clean.noteCards.length ? [...clean.noteCards, ...(ex.noteCards || [])] : ex.noteCards });
         } else byKey.set(key || clean.id, clean);
       }
       return Array.from(byKey.values());
@@ -487,7 +490,7 @@ export default function CRM({ user }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel */}
-      <aside style={{ width: 194, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+      <aside style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -547,7 +550,7 @@ export default function CRM({ user }) {
       </main>
 
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
-        onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
+        onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
@@ -712,7 +715,7 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
         <option value="all">{label}</option>
         {options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select>
-      <span style={{ fontSize: 8, color: active ? C.action : C.faint, pointerEvents: "none" }}>▾</span>
+      <span style={{ fontSize: 10, color: active ? C.action : C.sub, pointerEvents: "none" }}>▾</span>
     </div>
   );
 }
@@ -1140,17 +1143,8 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
 
 /* --------------------------- Detail drawer --------------------------- */
 // Live past-charges (invoices) for a client, pulled from ChargeOver on open.
-function PastCharges({ client }) {
-  const [state, setState] = useState({ loading: true, invoices: [], error: "" });
-  useEffect(() => {
-    let alive = true;
-    setState({ loading: true, invoices: [], error: "" });
-    fetch(`/api/chargeover/invoices?co=${encodeURIComponent(client.chargeoverId)}`)
-      .then((r) => r.json())
-      .then((d) => { if (alive) setState({ loading: false, invoices: d.invoices || [], error: d.error || "" }); })
-      .catch(() => { if (alive) setState({ loading: false, invoices: [], error: "load" }); });
-    return () => { alive = false; };
-  }, [client.chargeoverId]);
+// Invoice state is owned by DetailDrawer (it also feeds the Amount prefill) and passed in.
+function PastCharges({ client, state }) {
   const copyText = () => {
     const lines = [`Past charges — ${client.company || client.name}`];
     if (client.coBalance != null) lines.push(`Live balance: ${money(client.coBalance, client.currency)} (as of last sync)`);
@@ -1185,7 +1179,7 @@ function PastCharges({ client }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onUpdateSettings, officeSiblings = [], onOpen }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onUpdateSettings, officeSiblings = [], onOpen, currentUser }) {
   const set = (patch) => onUpdate(client.id, patch);
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
   const [payAmt, setPayAmt] = useState(client.amount);
@@ -1198,35 +1192,54 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   const behind = arrearsPeriods(client);
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
 
+  // ChargeOver invoices — shown in Past charges AND used to prefill Amount.
+  const [inv, setInv] = useState({ loading: true, invoices: [], error: "" });
+  useEffect(() => {
+    if (!client.chargeoverId) { setInv({ loading: false, invoices: [], error: "" }); return; }
+    let alive = true;
+    setInv({ loading: true, invoices: [], error: "" });
+    fetch(`/api/chargeover/invoices?co=${encodeURIComponent(client.chargeoverId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (alive) setInv({ loading: false, invoices: d.invoices || [], error: d.error || "" }); })
+      .catch(() => { if (alive) setInv({ loading: false, invoices: [], error: "load" }); });
+    return () => { alive = false; };
+  }, [client.chargeoverId]);
+  // Prefill Amount from the most recent invoice when no amount is set — stays editable.
+  useEffect(() => {
+    if (client.amount || !inv.invoices.length) return;
+    const latest = [...inv.invoices].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    if (latest && Number(latest.total) > 0) onUpdate(client.id, { amount: Number(latest.total) });
+  }, [inv.invoices, client.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
-        <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px" }}>
-          <div>
+        <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px", gap: 12 }}>
+          <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em" }}>
               {client.company || client.name}
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 10, verticalAlign: "middle" }}>
-                <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
-                  style={{ fontSize: 11.5, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none" }}>
-                  {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-                <span style={{ fontSize: 8, color: SEGMENTS[client.segment].color, pointerEvents: "none" }}>▾</span>
-              </span>
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
+          {/* Segment status — right-aligned against the card edge */}
+          <div className="flex items-center" style={{ gap: 12, flexShrink: 0 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
+                style={{ fontSize: 12, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlign: "right" }}>
+                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+              <span style={{ fontSize: 11, color: SEGMENTS[client.segment].color, pointerEvents: "none" }}>▾</span>
+            </span>
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
+          </div>
         </div>
-        {/* Card tabs: Info / Billing / Portal */}
-        <div className="flex" style={{ gap: 2, padding: "0 20px" }}>
+        {/* Card tabs: Info / Billing / Portal — same raised-tab design as the main page */}
+        <div className="flex items-end" style={{ gap: 3, padding: "6px 20px 0" }}>
           {[["info", "Info"], ["billing", "Billing"], ["portal", "Portal"]].map(([k, t]) => (
-            <button key={k} onClick={() => setDtab(k)}
-              style={{ fontSize: 13, fontWeight: 600, padding: "8px 14px", cursor: "pointer", border: "none", background: "transparent", color: dtab === k ? C.ink : C.sub, borderBottom: `2px solid ${dtab === k ? C.action : "transparent"}`, marginBottom: -1 }}>
-              {t}
-            </button>
+            <Tab key={k} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
         </div>
         </div>
@@ -1246,7 +1259,6 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             </Field>
             <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
             <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
-            <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
           </div>
 
           {/* Multi-office group */}
@@ -1271,6 +1283,9 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             </div>
           )}
 
+          {/* Notes & follow-up — dated note cards, before tags */}
+          <NotesSection client={client} onUpdate={set} userName={currentUser?.name || currentUser?.email || ""} />
+
           {/* Tags */}
           <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 4, marginBottom: 8 }}>Tags</div>
           <div className="flex" style={{ flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
@@ -1279,11 +1294,6 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               return <button key={k} onClick={() => toggleTag(k)} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${on ? v.color : C.line}`, background: on ? v.color : C.panel, color: on ? "#fff" : C.sub }}>{v.label}</button>;
             })}
           </div>
-
-          {/* Notes */}
-          <Field label="Notes">
-            <textarea rows={3} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} value={client.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Context, promises made, anything the next you needs to know" />
-          </Field>
 
           {/* Secondary contacts — additional / supplier contacts with phone */}
           <Section title="Additional contacts">
@@ -1343,7 +1353,9 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
             <Field label="Amount">
               <div className="flex items-center" style={{ gap: 6 }}>
-                <input type="number" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} />
+                {/* empty string when 0 so there's no stuck leading "0" while typing */}
+                <input type="number" placeholder={inv.loading ? "…" : "0"} style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount === 0 ? "" : client.amount}
+                  onChange={(e) => set({ amount: e.target.value === "" ? 0 : Number(e.target.value) })} />
                 {client.multiOffice && (
                   <select value={client.priceMode} onChange={(e) => set({ priceMode: e.target.value })} title="Billed per office or one group price"
                     style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.sub, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 8px", cursor: "pointer", outline: "none" }}>
@@ -1376,7 +1388,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
           )}
 
-          {client.chargeoverId && <PastCharges client={client} />}
+          {client.chargeoverId && <PastCharges client={client} state={inv} />}
 
           {/* Record payment */}
           <Section title="Record payment">
@@ -1441,6 +1453,41 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
         </div>
       </div>
     </div>
+  );
+}
+
+// Notes & follow-up: the follow-up date lives here, and each saved note becomes
+// a dated card stamped with who wrote it, deletable from its corner.
+function NotesSection({ client, onUpdate, userName }) {
+  const [draft, setDraft] = useState("");
+  const cards = client.noteCards || [];
+  const save = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onUpdate({ noteCards: [{ id: uid(), at: iso(), by: userName, text }, ...cards] });
+    setDraft("");
+  };
+  return (
+    <Section title="Notes & follow-up">
+      <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: C.sub, flexShrink: 0 }}>Follow up on</span>
+        <input type="date" style={{ ...inputStyle, width: "auto" }} value={client.followUp} onChange={(e) => onUpdate({ followUp: e.target.value })} />
+        {client.followUp && <button onClick={() => onUpdate({ followUp: "" })} title="Clear follow-up date" style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13 }}>✕</button>}
+      </div>
+      <div className="flex items-end" style={{ gap: 8, marginBottom: cards.length ? 12 : 0 }}>
+        <textarea rows={2} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5, flex: 1 }} value={draft} onChange={(e) => setDraft(e.target.value)}
+          placeholder="Context, promises made, anything the next you needs to know" />
+        <SolidBtn onClick={save}>Save</SolidBtn>
+      </div>
+      {cards.map((n) => (
+        <div key={n.id} style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 30px 10px 12px", marginBottom: 8 }}>
+          <button onClick={() => onUpdate({ noteCards: cards.filter((x) => x.id !== n.id) })} title="Delete note" aria-label="Delete note"
+            style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>✕</button>
+          <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO, marginBottom: 4 }}>{fmtDate(n.at)}{n.by ? ` · ${n.by}` : ""}</div>
+          <div style={{ fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{n.text}</div>
+        </div>
+      ))}
+    </Section>
   );
 }
 
@@ -1722,18 +1769,19 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
 }
 function Pill({ fg, bg, children }) { return <span style={{ fontSize: 11.5, fontWeight: 600, color: fg, background: bg, padding: "3px 9px", borderRadius: 20, display: "inline-block" }}>{children}</span>; }
 function MiniPill({ fg, bg, children }) { return <span style={{ fontSize: 10, fontWeight: 700, color: fg, background: bg, padding: "1px 7px", borderRadius: 10 }}>{children}</span>; }
-// Raised "real tab" look: active tab lifts up and fuses with the content edge;
-// inactive tabs sit lower on a recessed base.
+// Raised "real tab" look, shared by the main page and the client card: the
+// active tab lifts up and fuses with the content background (C.paper);
+// inactive tabs sit lower and darker on a recessed base.
 function Tab({ active, onClick, children }) {
   return (
     <button onClick={onClick} style={{
       fontSize: 13.5, fontWeight: 600, padding: active ? "10px 18px 11px" : "8px 16px", cursor: "pointer",
       border: `1px solid ${C.line}`, borderBottom: "none",
       borderRadius: "10px 10px 0 0",
-      background: active ? C.panel : C.lineSoft,
+      background: active ? C.paper : C.line,
       color: active ? C.ink : C.sub,
       marginBottom: -1, position: "relative", top: active ? 0 : 2,
-      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -4px 6px -4px rgba(34,48,76,0.18)",
+      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -4px 6px -4px rgba(34,48,76,0.22)",
       transition: "all 0.12s ease-out", zIndex: active ? 2 : 1,
     }}>
       {children}
@@ -1753,7 +1801,7 @@ function CompactSelect({ value, onChange, children }) {
       <select value={value} onChange={onChange} style={{ border: "none", outline: "none", background: "transparent", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", fontSize: 14, color: C.ink, cursor: "pointer" }}>
         {children}
       </select>
-      <span style={{ fontSize: 9, color: C.faint, pointerEvents: "none" }}>▾</span>
+      <span style={{ fontSize: 11, color: C.sub, pointerEvents: "none" }}>▾</span>
     </div>
   );
 }

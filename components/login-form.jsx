@@ -63,17 +63,14 @@ export default function LoginForm() {
   const goSignin = () => { setMode("signin"); setError(""); setSent(null); };
 
   return (
-    <div className="flex items-center justify-center" style={{ minHeight: "100vh", background: C.paper, fontFamily: SANS, color: C.ink, padding: 20 }}>
+    <div className="flex items-center justify-center" style={{ minHeight: "100vh", backgroundColor: C.paper, backgroundImage: "linear-gradient(rgba(255,255,255,0.7), rgba(255,255,255,0.7)), url(/login-bg.gif)", backgroundSize: "cover", backgroundPosition: "center", fontFamily: SANS, color: C.ink, padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 400 }}>
-        <div style={{ textAlign: "center", marginBottom: 22 }}>
-          <Wordmark size={34} />
-          <p style={{ color: C.sub, fontSize: 14, marginTop: 8 }}>
-            {mode === "signin" ? "Client Billing CRM · staff sign in" : "Reset your password"}
-          </p>
-        </div>
-
         {mode === "signin" && (
           <form onSubmit={submit} style={cardStyle}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <Wordmark size={32} />
+              <p style={{ color: C.sub, fontSize: 13.5, marginTop: 7 }}>Client Billing CRM · staff sign in</p>
+            </div>
             <label style={{ display: "block", marginBottom: 14 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, display: "block", marginBottom: 6 }}>Email</span>
               <input style={inputStyle} type="email" autoComplete="username" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -92,6 +89,10 @@ export default function LoginForm() {
 
         {mode === "forgot" && (sent ? (
           <div style={cardStyle}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <Wordmark size={32} />
+              <p style={{ color: C.sub, fontSize: 13.5, marginTop: 7 }}>Reset your password</p>
+            </div>
             {sent.emailConfigured ? (
               <>
                 <p style={{ fontSize: 14, color: C.ink, marginBottom: 6 }}>Check your email.</p>
@@ -107,6 +108,10 @@ export default function LoginForm() {
           </div>
         ) : (
           <form onSubmit={requestReset} style={cardStyle}>
+            <div style={{ textAlign: "center", marginBottom: 20 }}>
+              <Wordmark size={32} />
+              <p style={{ color: C.sub, fontSize: 13.5, marginTop: 7 }}>Reset your password</p>
+            </div>
             <p style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>Enter your email and we'll send you a link to set a new password.</p>
             <label style={{ display: "block", marginBottom: 18 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, display: "block", marginBottom: 6 }}>Email</span>

@@ -295,6 +295,8 @@ function normalise(r) {
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
     officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
     priceMode: r.priceMode === "group" ? "group" : "per-office", // per-office billing vs one group price
+    // Maritz portal per-company billing choices (prices themselves are global in settings)
+    maritzBilling: { cadence: r.maritzBilling?.cadence === "annual" ? "annual" : "monthly", includeSetup: !!r.maritzBilling?.includeSetup },
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -344,7 +346,13 @@ function exportCsv(clients) {
 /* =============================== App =============================== */
 export default function CRM({ user }) {
   const [clients, setClients] = useState([]);
-  const [settings, setSettings] = useState({ currency: "USD", businessName: "VIPER", senderName: "Darryl", emailTemplates: {} });
+  const [settings, setSettings] = useState({
+    currency: "USD", businessName: "VIPER", senderName: "Darryl", emailTemplates: {},
+    // Global pricing — edited on any Viper/Maritz card, applies to every card of that type.
+    viperPricing: { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 },
+    maritzPricing: { monthly: 40, annual: 400, setupFee: 140 },
+    maritzGroupPricing: {}, // per office-group: { [group]: { singleOffice, group } }
+  });
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [tab, setTab] = useState("digest");
@@ -381,7 +389,12 @@ export default function CRM({ user }) {
         if (r.status === 401) { window.location.href = "/login"; return; }
         const d = await r.json();
         if (Array.isArray(d.clients)) setClients(d.clients.map(normalise));
-        if (d.settings) setSettings((s) => ({ ...s, ...d.settings }));
+        if (d.settings) setSettings((s) => ({
+          ...s, ...d.settings,
+          viperPricing: { ...s.viperPricing, ...(d.settings.viperPricing || {}) },
+          maritzPricing: { ...s.maritzPricing, ...(d.settings.maritzPricing || {}) },
+          maritzGroupPricing: d.settings.maritzGroupPricing || {},
+        }));
       } catch (e) { /* first run / offline — start empty */ }
       finally { setLoaded(true); }
     })();
@@ -533,6 +546,7 @@ export default function CRM({ user }) {
       </main>
 
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
+        onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
@@ -1169,7 +1183,7 @@ function PastCharges({ client }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, officeSiblings = [], onOpen }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onUpdateSettings, officeSiblings = [], onOpen }) {
   const set = (patch) => onUpdate(client.id, patch);
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
   const [payAmt, setPayAmt] = useState(client.amount);
@@ -1182,8 +1196,8 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
 
   return (
-    <div onClick={onClose} className="flex justify-end" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 520, height: "100%", overflow: "auto", boxShadow: "-20px 0 60px rgba(34,48,76,0.25)" }}>
+    <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
         <div className="flex items-center justify-between" style={{ padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.panel, position: "sticky", top: 0, zIndex: 1 }}>
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>
@@ -1319,6 +1333,11 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
 
           {client.chargeoverId && <PastCharges client={client} />}
 
+          {/* Maritz portal pricing — shown for Maritz portal clients */}
+          {(client.segment === "maritz-portal" || client.maritzPortal) && (
+            <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
+          )}
+
           {/* Sent comms — a copy of every message sent, newest first */}
           {sentComms.length > 0 && (
             <Section title="Communications sent">
@@ -1368,6 +1387,11 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           {/* Portal user lists — captured employee lists, dated for change-tracking */}
           {(client.userLists || []).length > 0 && (
             <PortalUsers client={client} onUpdate={(patch) => set(patch)} />
+          )}
+
+          {/* Viper subscription — user count + tiered pricing, for Viper customers */}
+          {(client.segment === "viper-current" || client.viperCustomer) && (
+            <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} />
           )}
 
           {/* Archive / delete */}
@@ -1443,6 +1467,13 @@ function CopyLink({ getText, label = "Copy" }) {
 
 // Columns of a captured portal user list, matching the admin "All Employees" table.
 const USERLIST_COLS = ["Name", "Title", "Primary Office", "Admin", "Data Admin", "Terminated", "Expired", "Last Login"];
+// Display order puts Last Login first; the rest follow in their original order.
+const USERLIST_VIEW = [7, 0, 1, 2, 3, 4, 5, 6];
+const LAST_LOGIN_IDX = 7;
+// Sort key for "most recent login first" — blanks / "-" sink to the bottom.
+function lastLoginTime(u) { const d = parseDate(u && u[LAST_LOGIN_IDX]); return d ? d.getTime() : -Infinity; }
+// A user counts as "current" if not terminated and not expired.
+function isCurrentUser(u) { const t = u[5], e = u[6]; const blank = (v) => !v || v === "-"; return blank(t) && blank(e); }
 // Plain-text block of a user list for pasting into an email to the client.
 function userListToText(client, list) {
   const lines = [`${client.company || client.name} — portal users (collected ${fmtDate(list.collectedAt)})`, ""];
@@ -1456,36 +1487,68 @@ function userListToText(client, list) {
   return lines.join("\n");
 }
 // One captured user list: dated header, copy-for-email, archive/delete, expandable table.
-function UserListBlock({ client, list, onArchive, onDelete }) {
+// Rows show Last Login first and sort most-recent-first. Editing a list saves a
+// brand-new dated list and archives this one (onSaveEdit).
+function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
   const [open, setOpen] = useState(!list.archived);
   const [copied, setCopied] = useState(false);
+  const [draft, setDraft] = useState(null); // null = not editing; array = editing
   const copy = () => { navigator.clipboard?.writeText(userListToText(client, list)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  const rows = draft ?? (list.users || []).slice().sort((a, b) => lastLoginTime(b) - lastLoginTime(a));
+  const startEdit = () => { setDraft((list.users || []).map((u) => USERLIST_COLS.map((_, j) => u[j] ?? ""))); setOpen(true); };
+  const editCell = (i, viewCol, val) => setDraft((d) => d.map((u, k) => (k === i ? u.map((c, j) => (j === viewCol ? val : c)) : u)));
+  const addRow = () => setDraft((d) => [...d, USERLIST_COLS.map(() => "")]);
+  const delRow = (i) => setDraft((d) => d.filter((_, k) => k !== i));
+  const save = () => { onSaveEdit(draft.filter((u) => u.some((c) => (c || "").trim()))); setDraft(null); };
   return (
     <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: list.archived ? 0.6 : 1 }}>
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
         <button onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.ink }}>
           {open ? "▾" : "▸"} Collected {fmtDate(list.collectedAt)}
         </button>
-        <span style={{ fontSize: 11.5, color: C.faint }}>{(list.users || []).length} users{list.archived ? " · archived" : ""}</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>{rows.length} users{list.archived ? " · archived" : ""}{draft ? " · editing" : ""}</span>
         <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
-          <button onClick={copy} title="Copy user list for an email" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: copied ? C.green : C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
-            {copied ? "Copied" : "Copy"}
-          </button>
-          <button onClick={onArchive} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>{list.archived ? "Unarchive" : "Archive"}</button>
-          <button onClick={onDelete} style={{ fontSize: 11.5, fontWeight: 600, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete</button>
+          {draft ? (
+            <>
+              <button onClick={save} style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: C.action, border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>Save changes</button>
+              <button onClick={() => setDraft(null)} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <button onClick={copy} title="Copy user list for an email" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: copied ? C.green : C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+                {copied ? "Copied" : "Copy"}
+              </button>
+              {!list.archived && <button onClick={startEdit} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Edit</button>}
+              <button onClick={onArchive} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>{list.archived ? "Unarchive" : "Archive"}</button>
+              <button onClick={onDelete} style={{ fontSize: 11.5, fontWeight: 600, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete</button>
+            </>
+          )}
         </div>
       </div>
       {open && (
         <div style={{ overflowX: "auto", marginTop: 8 }}>
           <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
-            <thead><tr>{USERLIST_COLS.map((c) => <th key={c} style={{ textAlign: "left", color: C.sub, fontWeight: 600, padding: "4px 8px", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>
+            <thead><tr>
+              {USERLIST_VIEW.map((j) => <th key={j} style={{ textAlign: "left", color: C.sub, fontWeight: 600, padding: "4px 8px", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{USERLIST_COLS[j]}</th>)}
+              {draft && <th style={{ borderBottom: `1px solid ${C.line}` }} />}
+            </tr></thead>
             <tbody>
-              {(list.users || []).map((u, i) => (
-                <tr key={i}>{u.map((cell, j) => <td key={j} style={{ padding: "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: cell && cell !== "-" ? C.ink : C.faint, whiteSpace: "nowrap" }}>{cell && cell !== "-" ? cell : "—"}</td>)}</tr>
+              {rows.map((u, i) => (
+                <tr key={i}>
+                  {USERLIST_VIEW.map((j) => (
+                    <td key={j} style={{ padding: draft ? "2px 4px" : "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: u[j] && u[j] !== "-" ? C.ink : C.faint, whiteSpace: "nowrap" }}>
+                      {draft
+                        ? <input value={u[j] ?? ""} onChange={(e) => editCell(i, j, e.target.value)} style={{ fontSize: 11.5, padding: "3px 5px", borderRadius: 5, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, width: j === LAST_LOGIN_IDX ? 130 : j === 0 ? 130 : 100 }} />
+                        : (u[j] && u[j] !== "-" ? u[j] : "—")}
+                    </td>
+                  ))}
+                  {draft && <td style={{ padding: "2px 4px", borderBottom: `1px solid ${C.lineSoft}` }}><button onClick={() => delRow(i)} title="Remove user" style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 13 }}>✕</button></td>}
+                </tr>
               ))}
             </tbody>
           </table>
+          {draft && <button onClick={addRow} style={{ marginTop: 8, fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: `1px dashed ${C.line}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>+ Add user</button>}
         </div>
       )}
     </div>
@@ -1497,12 +1560,18 @@ function PortalUsers({ client, onUpdate }) {
   const active = lists.filter((l) => !l.archived);
   const archived = lists.filter((l) => l.archived);
   const [showArchived, setShowArchived] = useState(false);
+  // Editing a list writes a fresh dated list and archives the one that was edited.
+  const saveEdit = (list, users) => setLists([
+    { id: uid(), collectedAt: iso(), source: "edited", users },
+    ...lists.map((l) => (l.id === list.id ? { ...l, archived: true } : l)),
+  ]);
   return (
     <Section title="Portal users">
       {active.map((list) => (
         <UserListBlock key={list.id} client={client} list={list}
           onArchive={() => setLists(lists.map((l) => (l.id === list.id ? { ...l, archived: true } : l)))}
-          onDelete={() => setLists(lists.filter((l) => l.id !== list.id))} />
+          onDelete={() => setLists(lists.filter((l) => l.id !== list.id))}
+          onSaveEdit={(users) => saveEdit(list, users)} />
       ))}
       {active.length === 0 && archived.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No user lists captured yet.</div>}
       {archived.length > 0 && (
@@ -1516,6 +1585,114 @@ function PortalUsers({ client, onUpdate }) {
               onDelete={() => setLists(lists.filter((l) => l.id !== list.id))} />
           ))}
         </>
+      )}
+    </Section>
+  );
+}
+// Current (non-terminated, non-expired) users in the most recent active list.
+function currentUserCount(client) {
+  const active = (client.userLists || []).filter((l) => !l.archived);
+  if (!active.length) return 0;
+  const latest = active.slice().sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))[0];
+  return (latest.users || []).filter(isCurrentUser).length;
+}
+// Tiered monthly Viper price. 1..(tier2Min-1) = flat base; up to (tier3Min-1) = tier2/user; then tier3/user.
+function viperMonthly(n, p) {
+  if (n <= 0) return 0;
+  if (n < p.tier2Min) return Number(p.base) || 0;
+  if (n < p.tier3Min) return n * (Number(p.tier2) || 0);
+  return n * (Number(p.tier3) || 0);
+}
+// Viper subscription: current user count + tiered price. Pricing is GLOBAL (settings) — editing here changes every Viper card.
+function ViperSubscription({ client, settings, onUpdateSettings }) {
+  const p = settings.viperPricing || { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 };
+  const [edit, setEdit] = useState(false);
+  const n = currentUserCount(client);
+  const total = viperMonthly(n, p);
+  const tier = n <= 0 ? "—" : n < p.tier2Min ? `Base (1–${p.tier2Min - 1} users)` : n < p.tier3Min ? `${p.tier2Min}–${p.tier3Min - 1} users · ${money(p.tier2, "USD")}/user` : `${p.tier3Min}+ users · ${money(p.tier3, "USD")}/user`;
+  const setP = (patch) => onUpdateSettings({ viperPricing: { ...p, ...patch } });
+  const numIn = (val, on) => <input type="number" value={val} onChange={(e) => on(Number(e.target.value))} style={{ ...inputStyle, padding: "7px 9px" }} />;
+  return (
+    <Section title="Viper subscription" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
+      <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 12.5, color: C.sub }}>Current users</span>
+        <span style={{ fontSize: 15, fontWeight: 700, fontFamily: MONO }}>{n}</span>
+      </div>
+      <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 12.5, color: C.sub }}>Monthly subscription</span>
+        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}/mo</span>
+      </div>
+      <div style={{ fontSize: 11.5, color: C.faint }}>{tier}</div>
+      {edit && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
+          <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginBottom: 8 }}>Global — applies to every Viper customer.</div>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>Base 1–{p.tier2Min - 1} ($/mo)</span>{numIn(p.base, (v) => setP({ base: v }))}</div>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>{p.tier2Min}–{p.tier3Min - 1} ($/user)</span>{numIn(p.tier2, (v) => setP({ tier2: v }))}</div>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>{p.tier3Min}+ ($/user)</span>{numIn(p.tier3, (v) => setP({ tier3: v }))}</div>
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+// Maritz portal pricing. Single-office prices + setup fee are GLOBAL (settings).
+// Multi-office companies get separate Single-office / Group pricing stored per
+// office-group in settings — editing updates every linked office in that group.
+function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSiblings = [] }) {
+  const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 140 };
+  const [edit, setEdit] = useState(false);
+  const b = client.maritzBilling || { cadence: "monthly", includeSetup: false };
+  const setB = (patch) => onUpdate({ maritzBilling: { ...b, ...patch } });
+  const setP = (patch) => onUpdateSettings({ maritzPricing: { ...p, ...patch } });
+  const base = b.cadence === "annual" ? Number(p.annual) || 0 : Number(p.monthly) || 0;
+  const total = base + (b.includeSetup ? Number(p.setupFee) || 0 : 0);
+  const numIn = (val, on, ph) => <input type="number" value={val} placeholder={ph} onChange={(e) => on(e.target.value === "" ? "" : Number(e.target.value))} style={{ ...inputStyle, padding: "7px 9px" }} />;
+
+  if (client.multiOffice) {
+    const gpAll = settings.maritzGroupPricing || {};
+    const gp = gpAll[client.officeGroup] || { singleOffice: "", group: "" };
+    const setGp = (patch) => onUpdateSettings({ maritzGroupPricing: { ...gpAll, [client.officeGroup]: { ...gp, ...patch } } });
+    return (
+      <Section title="Maritz portal pricing">
+        <div style={{ fontSize: 12, color: C.sub, marginBottom: 8 }}>
+          Multi-office group <span style={{ fontWeight: 600, color: C.action }}>{client.officeGroup || "—"}</span> · {officeSiblings.length + 1} linked office{officeSiblings.length === 0 ? "" : "s"}. Group pricing applies to all of them.
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div><span style={{ fontSize: 11.5, color: C.sub, display: "block", marginBottom: 4 }}>Single office ($/mo)</span>{numIn(gp.singleOffice, (v) => setGp({ singleOffice: v }), "TBD")}</div>
+          <div><span style={{ fontSize: 11.5, color: C.sub, display: "block", marginBottom: 4 }}>Group price ($/mo)</span>{numIn(gp.group, (v) => setGp({ group: v }), "TBD")}</div>
+        </div>
+        <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>Pricing to be confirmed — placeholders until set.</div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Maritz portal pricing" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
+      <div className="flex items-center" style={{ gap: 6, marginBottom: 8 }}>
+        {["monthly", "annual"].map((cad) => (
+          <button key={cad} onClick={() => setB({ cadence: cad })} style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${b.cadence === cad ? C.action : C.line}`, background: b.cadence === cad ? C.action : C.panel, color: b.cadence === cad ? "#fff" : C.sub }}>
+            {cad === "annual" ? `Annual ${money(p.annual, "USD")}` : `Monthly ${money(p.monthly, "USD")}`}
+          </button>
+        ))}
+      </div>
+      <label className="flex items-center" style={{ gap: 8, cursor: "pointer", marginBottom: 8 }}>
+        <input type="checkbox" checked={!!b.includeSetup} onChange={(e) => setB({ includeSetup: e.target.checked })} />
+        <span style={{ fontSize: 12.5, color: C.ink }}>Add one-time setup fee ({money(p.setupFee, "USD")})</span>
+      </label>
+      <div className="flex items-baseline justify-between" style={{ gap: 8, paddingTop: 6, borderTop: `1px solid ${C.lineSoft}` }}>
+        <span style={{ fontSize: 12.5, color: C.sub }}>Total{b.includeSetup ? " (incl. setup)" : ""}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}{b.includeSetup ? "" : b.cadence === "annual" ? "/yr" : "/mo"}</span>
+      </div>
+      {edit && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
+          <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginBottom: 8 }}>Global — applies to every single-office Maritz portal client.</div>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>Monthly ($)</span>{numIn(p.monthly, (v) => setP({ monthly: v }))}</div>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>Annual ($)</span>{numIn(p.annual, (v) => setP({ annual: v }))}</div>
+            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>Setup fee ($)</span>{numIn(p.setupFee, (v) => setP({ setupFee: v }))}</div>
+          </div>
+        </div>
       )}
     </Section>
   );

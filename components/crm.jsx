@@ -277,6 +277,10 @@ function normalise(r) {
     workflowHidden: !!r.workflowHidden,
     maritzPortal: !!r.maritzPortal,
     viperCustomer: !!r.viperCustomer,
+    portalUrl: (r.portalUrl || "").trim(),
+    adminUrl: (r.adminUrl || "").trim(),
+    portalUser: (r.portalUser || "").trim(),
+    portalPassword: r.portalPassword || "",
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -662,8 +666,9 @@ function Funnel({ color }) {
 // A column heading that IS a filter dropdown. Shows a funnel + turns accent-coloured when active.
 function HeaderFilter({ label, value, onChange, options, align = "left" }) {
   const active = value !== "all";
+  const justify = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: align === "right" ? "flex-end" : "flex-start" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: justify }}>
       {active && (
         <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex" }}>
           <Funnel color={C.action} />
@@ -672,7 +677,7 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
       <select value={value} onChange={(e) => onChange(e.target.value)} title="Filter this column"
         style={{ maxWidth: "100%", fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: active ? 700 : 600,
           color: active ? C.action : C.sub, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: 0,
-          appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlignLast: align === "right" ? "right" : "left" }}>
+          appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlignLast: align === "right" ? "right" : align === "center" ? "center" : "left" }}>
         <option value="all">{label}</option>
         {options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select>
@@ -714,7 +719,7 @@ function EmailIconMenu({ client, templates, onPick }) {
 // Maritz Portal, Viper Customer, …) — same look everywhere it's used.
 function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
   return (
-    <div className="flex items-center" style={{ gap: 6, minWidth: 0 }} onClick={(e) => e.stopPropagation()}>
+    <div className="flex items-center" style={{ gap: 6, minWidth: 0, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
       <span style={{ width: 6, height: 6, borderRadius: 6, background: value ? C.green : C.faint, flexShrink: 0 }} />
       <select value={value ? "yes" : "no"} onChange={(e) => onChange(e.target.value === "yes")}
         title={title} style={{ fontSize: 12, fontWeight: 600, color: value ? C.green : C.faint, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
@@ -774,11 +779,11 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
         <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
-          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Maritz Portal" value={mp} onChange={setMp} options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Billing" value={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
+          <HeaderFilter label="Stage" value={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Maritz Portal" value={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
@@ -797,15 +802,15 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
                 </div>
                 <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.email || "no email"}{c.chargeoverId ? ` · CO#${c.chargeoverId}` : ""}</div>
               </div>
-              <div>
+              <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                 <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
                   title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
                   {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
                 </select>
               </div>
-              <div>
+              <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                 <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
-                  title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
+                  title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
                   {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
                 </select>
               </div>
@@ -1269,6 +1274,22 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           {client.archivedContacts?.length > 0 && (
             <Section title="Archived contacts">
               {client.archivedContacts.map((a, i) => <div key={i} style={{ fontSize: 12, color: C.faint, fontFamily: MONO, padding: "3px 0" }}>{a.email} · {a.reason}</div>)}
+            </Section>
+          )}
+
+          {/* Legacy Viper portal access — shown for Viper Customers (or whenever creds exist) */}
+          {(client.viperCustomer || client.portalUrl || client.adminUrl || client.portalUser || client.portalPassword) && (
+            <Section title="Viper portal access">
+              <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Portal URL"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalUrl} onChange={(e) => set({ portalUrl: e.target.value })} placeholder="https://…" /></Field>
+                <Field label="Admin URL"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.adminUrl} onChange={(e) => set({ adminUrl: e.target.value })} placeholder="https://…" /></Field>
+                <Field label="User name"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalUser} onChange={(e) => set({ portalUser: e.target.value })} /></Field>
+                <Field label="Password"><input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={client.portalPassword} onChange={(e) => set({ portalPassword: e.target.value })} /></Field>
+              </div>
+              <div className="flex" style={{ gap: 8 }}>
+                {client.portalUrl && <a href={client.portalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
+                {client.adminUrl && <a href={client.adminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
+              </div>
             </Section>
           )}
 

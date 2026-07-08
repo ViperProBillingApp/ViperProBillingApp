@@ -460,7 +460,7 @@ export default function CRM({ user }) {
         <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
-        <MenuItem onClick={() => setModal("emails")}>Emails</MenuItem>
+        <MenuItem onClick={() => setModal("emails")}>Email templates</MenuItem>
         <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
@@ -487,7 +487,7 @@ export default function CRM({ user }) {
         </div>
 
         <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Comms"]].map(([k, t]) => (
+          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
             <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
           ))}
         </nav>
@@ -756,7 +756,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
   }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
-  const gridCols = "1.2fr 1fr 0.75fr 0.75fr 0.75fr 0.75fr 0.85fr 40px";
+  const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 1fr 0.9fr 40px";
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -769,10 +769,10 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search (incl. old emails & ChargeOver ID)"
-          style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
+          style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
       </div>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 12, alignItems: "center" }}>
+        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
@@ -786,7 +786,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           const behind = arrearsPeriods(c);
           const cur = c.currency || settings.currency;
           return (
-            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 12, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
               <div style={{ minWidth: 0 }}>
                 <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
                   <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />

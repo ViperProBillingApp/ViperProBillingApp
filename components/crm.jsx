@@ -120,6 +120,15 @@ function monthlyValue(c) { return (Number(c.amount) || 0) / (CADENCE[c.cadence]?
 // date-only string parses as UTC midnight, which can read as "not due yet"
 // or "already due" depending on the browser's timezone offset from UTC.
 function followUpDue(c, now = new Date()) { return !!c.followUp && c.followUp <= iso(now); }
+// Who needs a follow-up. An explicit follow-up date that's due always counts;
+// otherwise it's derived from the workflow — "need to contact" and "contacted ·
+// awaiting reply" are the stages where the ball is in your court. Skips
+// archived / former clients.
+const FOLLOWUP_STAGES = ["need-to-contact", "contacted-awaiting"];
+function needsFollowUp(c, now = new Date()) {
+  if (c.archivedClient || c.formerCustomer) return false;
+  return followUpDue(c, now) || FOLLOWUP_STAGES.includes(c.stage);
+}
 function logActivity(c, type, text) {
   return [{ at: new Date().toISOString(), type, text }, ...(c.activity || [])].slice(0, 200);
 }
@@ -632,7 +641,7 @@ function StatStrip({ clients, settings, bounced }) {
         if (Number(c.amount) > 0) mrrKnown++;
       }
       if (["not-up-to-date", "payment-failed"].includes(c.billingStatus)) notUpToDate++;
-      if (followUpDue(c, now)) followUps++;
+      if (needsFollowUp(c, now)) followUps++;
     }
     const owedStr = Object.entries(owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
     return { owedStr, overdue, mrr, mrrKnown, notUpToDate, followUps, synced, total: clients.length };
@@ -642,7 +651,7 @@ function StatStrip({ clients, settings, bounced }) {
       <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
       <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} />
       <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} />
-      <Stat label="Follow-ups due" value={String(s.followUps)} sub="scheduled to chase today" accent={s.followUps ? C.amber : C.green} />
+      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} />
       <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} />
     </section>
   );
@@ -1061,7 +1070,8 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const now = new Date();
   const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
   const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
-  const followUps = clients.filter((c) => followUpDue(c, now));
+  const followUps = clients.filter((c) => needsFollowUp(c, now))
+    .sort((a, b) => (followUpDue(b, now) - followUpDue(a, now)) || STAGES[a.stage].order - STAGES[b.stage].order);
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
   const Row = ({ n, label, tint, to }) => (
@@ -1078,26 +1088,28 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Row n={reminderList.length} label="Payment reminders to send" tint={C.red} to="comms" />
           <Row n={finals.length} label="Final notices (3+ periods behind)" tint={C.red} to="comms" />
-          <Row n={followUps.length} label="Follow-ups due today" tint={C.amber} to="workflow" />
+          <Row n={followUps.length} label="Follow-ups (need to contact / awaiting reply)" tint={C.amber} to="workflow" />
           <Row n={oldPricing.length} label="Old pricing — notices to send" tint={C.amber} to="comms" />
           <Row n={pendingContacts.length} label="Recovered contacts awaiting approval" tint={C.action} to="recovery" />
           <Row n={bounced} label="Bounced contacts to recover" tint={C.red} to="recovery" />
         </div>
       </div>
-      {followUps.length > 0 && (
-        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Follow-ups due</h3>
-          {followUps.map((c) => (
-            <button key={c.id} onClick={() => onOpen(c.id)} className="flex items-center justify-between" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${C.lineSoft}`, padding: "9px 2px", cursor: "pointer" }}>
-              <div>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
-                <div style={{ fontSize: 11.5, color: C.sub }}>{c.notes ? c.notes.slice(0, 60) + (c.notes.length > 60 ? "…" : "") : STAGES[c.stage].label}</div>
-              </div>
-              <span style={{ fontSize: 11, fontFamily: MONO, color: C.amber, whiteSpace: "nowrap" }}>{fmtDate(c.followUp)}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Follow-ups</h3>
+        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 10 }}>Clients you need to contact or are awaiting a reply from — plus any with a follow-up date set. Click to open.</p>
+        {followUps.length === 0 && <div style={{ fontSize: 12.5, color: C.faint }}>Nothing to follow up — every client is up to date or on hold.</div>}
+        {followUps.map((c) => (
+          <button key={c.id} onClick={() => onOpen(c.id)} className="flex items-center justify-between" style={{ width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${C.lineSoft}`, padding: "9px 2px", cursor: "pointer", gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</div>
+              <div style={{ fontSize: 11.5, color: STAGES[c.stage].color, fontWeight: 600 }}>{STAGES[c.stage].label}</div>
+            </div>
+            {followUpDue(c, now)
+              ? <span style={{ fontSize: 11, fontFamily: MONO, color: C.amber, whiteSpace: "nowrap" }}>due {fmtDate(c.followUp)}</span>
+              : <span style={{ fontSize: 15, color: C.faint }}>›</span>}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1156,7 +1168,12 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 520, height: "100%", overflow: "auto", boxShadow: "-20px 0 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.panel, position: "sticky", top: 0, zIndex: 1 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>{client.company || client.name}{client.archivedClient ? " · archived" : ""}{client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+              {client.company || client.name}
+              <span style={{ fontSize: 11, fontWeight: 600, color: SEGMENTS[client.segment].color, marginLeft: 8, verticalAlign: "middle" }}>{SEGMENTS[client.segment].label}</span>
+              {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
+              {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
+            </h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>

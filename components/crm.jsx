@@ -14,10 +14,9 @@ const SYMBOL = { GBP: "£", USD: "$", EUR: "€" };
 
 /* ------------------------------ Axes ------------------------------ */
 const SEGMENTS = {
-  "viper-current": { label: "Viper — Current", color: "#0E766E" },
-  "viper-past": { label: "Viper — Past", color: "#8A94A6" },
-  "maritz-portal": { label: "Maritz — Viper Portal", color: "#3B5BA5" },
-  "maritz-viper-portal": { label: "Maritz - Portal", color: "#7A4FB5" },
+  "viper-current": { label: "Viper Customer", color: "#0E766E" },
+  "viper-past": { label: "Past Viper Customer", color: "#8A94A6" },
+  "maritz-portal": { label: "Maritz - Viper Portal", color: "#3B5BA5" },
 };
 const BILLING = {
   "current-pricing": { label: "Up to date · current pricing", color: C.green, bg: C.greenBg },
@@ -254,11 +253,11 @@ function getTemplates(settings) {
 /* ---------------------------- Sample data ---------------------------- */
 const SAMPLE = [
   { name: "Harbourside Events", company: "Harbourside Events Ltd", email: "accounts@harbourside.co", segment: "viper-current", billingStatus: "not-up-to-date", stage: "need-to-contact", tags: ["price-pending"], amount: 480, billingDay: 1, cadence: "monthly", currency: "USD", createdAt: monthsAgo(8), payments: [{ date: monthsAgo(2, 3), amount: 480 }], notes: "Promised payment after their summer program — chase if nothing by mid-month." },
-  { name: "Marina Bay Group", company: "Marina Bay Group", email: "finance@marinabay.com", phone: "+1 435 555 0110", segment: "maritz-viper-portal", billingStatus: "current-pricing", stage: "up-to-date", tags: ["vip"], amount: 950, billingDay: 5, cadence: "monthly", currency: "USD", createdAt: monthsAgo(14), payments: [{ date: iso(), amount: 950 }, { date: monthsAgo(1), amount: 950 }] },
+  { name: "Marina Bay Group", company: "Marina Bay Group", email: "finance@marinabay.com", phone: "+1 435 555 0110", segment: "maritz-portal", billingStatus: "current-pricing", stage: "up-to-date", tags: ["vip"], amount: 950, billingDay: 5, cadence: "monthly", currency: "USD", createdAt: monthsAgo(14), payments: [{ date: iso(), amount: 950 }, { date: monthsAgo(1), amount: 950 }] },
   { name: "Cannes Lettings Ltd", company: "Cannes Lettings", email: "hello@canneslettings.fr", segment: "maritz-portal", billingStatus: "not-up-to-date", stage: "not-contacted", tags: [], amount: 3600, billingDay: 3, cadence: "annual", currency: "EUR", createdAt: monthsAgo(26), payments: [{ date: monthsAgo(14, 3), amount: 3600 }], emailStatus: "bounced" },
   { name: "Dickey & Co", company: "Dickey & Co", email: "billing@dickeyco.uk", segment: "viper-current", billingStatus: "current-pricing", stage: "up-to-date", tags: [], amount: 320, billingDay: 28, cadence: "monthly", currency: "GBP", createdAt: monthsAgo(6), payments: [{ date: monthsAgo(1, 27), amount: 320 }] },
   { name: "Newquay Coast Rentals", company: "Newquay Coast Rentals", email: "team@newquaycoast.co.uk", segment: "maritz-portal", billingStatus: "old-pricing", stage: "contacted-awaiting", tags: ["price-pending"], amount: 275, billingDay: 15, cadence: "monthly", currency: "USD", createdAt: monthsAgo(20), payments: [{ date: monthsAgo(0, 14), amount: 275 }], followUp: iso() },
-  { name: "Antibes Villas", company: "Antibes Villas SARL", email: "pay@antibesvillas.fr", segment: "maritz-viper-portal", billingStatus: "payment-failed", stage: "need-to-contact", tags: ["email-bouncing", "needs-contact-info"], amount: 640, billingDay: 10, cadence: "monthly", currency: "USD", createdAt: monthsAgo(9), payments: [{ date: monthsAgo(3, 9), amount: 640 }], emailStatus: "bounced" },
+  { name: "Antibes Villas", company: "Antibes Villas SARL", email: "pay@antibesvillas.fr", segment: "maritz-portal", billingStatus: "payment-failed", stage: "need-to-contact", tags: ["email-bouncing", "needs-contact-info"], amount: 640, billingDay: 10, cadence: "monthly", currency: "USD", createdAt: monthsAgo(9), payments: [{ date: monthsAgo(3, 9), amount: 640 }], emailStatus: "bounced" },
   { name: "Old Pier Studios", company: "Old Pier Studios", email: "admin@oldpier.co.uk", segment: "viper-past", billingStatus: "marked-deletion", stage: "marked-deletion", tags: [], amount: 180, billingDay: 20, cadence: "monthly", currency: "USD", createdAt: monthsAgo(30) },
 ];
 
@@ -270,7 +269,8 @@ function normalise(r) {
     company: (r.company || r.name || "").trim(),
     email: (r.email || "").trim(),
     phone: (r.phone || "").trim(),
-    segment: SEGMENTS[r.segment] ? r.segment : "viper-current",
+    // "maritz-viper-portal" was retired into "maritz-portal" — remap lingering rows
+    segment: SEGMENTS[r.segment] ? r.segment : (r.segment === "maritz-viper-portal" ? "maritz-portal" : "viper-current"),
     billingStatus: BILLING[r.billingStatus] ? r.billingStatus : "never-charged",
     stage: STAGES[r.stage] ? r.stage : "not-contacted",
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => TAGS[t]) : [],
@@ -1072,12 +1072,15 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
   const followUps = clients.filter((c) => needsFollowUp(c, now))
     .sort((a, b) => (followUpDue(b, now) - followUpDue(a, now)) || STAGES[a.stage].order - STAGES[b.stage].order);
+  const activeC = clients.filter((c) => !c.archivedClient && !c.formerCustomer);
+  const needContact = activeC.filter((c) => c.stage === "need-to-contact");
+  const awaitingReply = activeC.filter((c) => c.stage === "contacted-awaiting");
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
   const Row = ({ n, label, tint, to }) => (
-    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 10, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+      <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, color: tint, minWidth: 26, textAlign: "right" }}>{n}</span>
       <span style={{ fontSize: 13.5 }}>{label}</span>
-      <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, color: tint }}>{n}</span>
     </button>
   );
   return (
@@ -1088,7 +1091,8 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Row n={reminderList.length} label="Payment reminders to send" tint={C.red} to="comms" />
           <Row n={finals.length} label="Final notices (3+ periods behind)" tint={C.red} to="comms" />
-          <Row n={followUps.length} label="Follow-ups (need to contact / awaiting reply)" tint={C.amber} to="workflow" />
+          <Row n={needContact.length} label="Need to contact" tint={C.amber} to="workflow" />
+          <Row n={awaitingReply.length} label="Awaiting reply" tint={C.amber} to="workflow" />
           <Row n={oldPricing.length} label="Old pricing — notices to send" tint={C.amber} to="comms" />
           <Row n={pendingContacts.length} label="Recovered contacts awaiting approval" tint={C.action} to="recovery" />
           <Row n={bounced} label="Bounced contacts to recover" tint={C.red} to="recovery" />
@@ -1127,8 +1131,18 @@ function PastCharges({ client }) {
       .catch(() => { if (alive) setState({ loading: false, invoices: [], error: "load" }); });
     return () => { alive = false; };
   }, [client.chargeoverId]);
+  const copyText = () => {
+    const lines = [`Past charges — ${client.company || client.name}`];
+    if (client.coBalance != null) lines.push(`Live balance: ${money(client.coBalance, client.currency)} (as of last sync)`);
+    lines.push("");
+    for (const inv of state.invoices) {
+      const status = inv.paid ? "paid" : inv.overdue ? "overdue" : "open";
+      lines.push(`${fmtDate(inv.date)} · #${inv.number} · ${status} · ${inv.currency}${(inv.total || 0).toLocaleString()}`);
+    }
+    return lines.join("\n");
+  };
   return (
-    <Section title="Past charges (ChargeOver)">
+    <Section title="Past charges (ChargeOver)" action={state.invoices.length > 0 ? <CopyLink getText={copyText} /> : null}>
       {client.coBalance != null && (
         <div style={{ fontSize: 12.5, marginBottom: 8, color: client.coBalance > 0 ? C.red : C.green, fontWeight: 600 }}>
           Live balance: {money(client.coBalance, client.currency)} <span style={{ color: C.faint, fontWeight: 500 }}>· as of last sync</span>
@@ -1170,7 +1184,10 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>
               {client.company || client.name}
-              <span style={{ fontSize: 11, fontWeight: 600, color: SEGMENTS[client.segment].color, marginLeft: 8, verticalAlign: "middle" }}>{SEGMENTS[client.segment].label}</span>
+              <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
+                style={{ fontSize: 11, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", marginLeft: 8, verticalAlign: "middle" }}>
+                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
@@ -1204,7 +1221,6 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             </Field>
             <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={client.billingDay} onChange={(e) => set({ billingDay: Number(e.target.value) })} /></Field>
           </div>
-          <Field label="Segment"><CompactSelect value={client.segment} onChange={(e) => set({ segment: e.target.value })}>{Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
           <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
           <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
           <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
@@ -1365,12 +1381,26 @@ function SentCommRow({ tKey, v }) {
     </div>
   );
 }
-function Section({ title, children }) {
+function Section({ title, action, children }) {
   return (
     <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, marginBottom: 14 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{title}</div>
+      <div className="flex items-center justify-between" style={{ marginBottom: 8, gap: 8 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: C.ink }}>{title}</div>
+        {action}
+      </div>
       {children}
     </div>
+  );
+}
+// Small inline "copy" affordance for section headers.
+function CopyLink({ getText, label = "Copy" }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => { const t = getText(); if (!t) return; navigator.clipboard?.writeText(t).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  return (
+    <button onClick={copy} title="Copy to clipboard" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: copied ? C.green : C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+      {copied ? "Copied" : label}
+    </button>
   );
 }
 

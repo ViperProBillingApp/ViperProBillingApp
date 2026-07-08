@@ -492,15 +492,15 @@ export default function CRM({ user }) {
       {/* Left navigation panel */}
       <aside style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
-        <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
-        <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
-        <MenuItem onClick={() => setModal("emails")}>Email templates</MenuItem>
-        <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
-        {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
-        <MenuItem onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
+        <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
+        <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
+        <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
+        <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
+        {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
+        <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
-          <MenuItem onClick={logout}>Sign out</MenuItem>
+          <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
         </div>
       </aside>
 
@@ -567,16 +567,31 @@ export default function CRM({ user }) {
   );
 }
 
+// Brand-blue nav glyphs — one per left-menu heading.
+function MenuIcon({ name, color }) {
+  const p = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
+  switch (name) {
+    case "add": return <svg {...p}><path d="M12 5v14M5 12h14" /></svg>;
+    case "recovery": return <svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>;
+    case "mail": return <svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>;
+    case "settings": return <svg {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>;
+    case "sync": return <svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>;
+    case "users": return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
+    case "signout": return <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>;
+    default: return null;
+  }
+}
 // Left-panel menu button
-function MenuItem({ onClick, active, children }) {
+function MenuItem({ onClick, active, icon, children }) {
   return (
     <button
       onClick={onClick}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.lineSoft; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
-      style={{ display: "block", width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
     >
-      {children}
+      {icon && <MenuIcon name={icon} color={C.action} />}
+      <span>{children}</span>
     </button>
   );
 }
@@ -1000,9 +1015,10 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
+  const [q, setQ] = useState("");
   const key = `${type}:${periodKey()}`;
 
-  const [audience, skipped] = useMemo(() => {
+  const [fullAudience, skipped] = useMemo(() => {
     let l;
     if (type === "deletion") {
       l = clients.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
@@ -1016,10 +1032,17 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
     return [l, before - l.length];
   }, [clients, type]);
 
+  // Search narrows the visible queue by company / contact / email.
+  const audience = useMemo(() => {
+    const k = q.trim().toLowerCase();
+    if (!k) return fullAudience;
+    return fullAudience.filter((c) => (c.company || "").toLowerCase().includes(k) || (c.name || "").toLowerCase().includes(k) || (c.email || "").toLowerCase().includes(k));
+  }, [fullAudience, q]);
+
   useEffect(() => { setSelId(null); }, [type]);
   const sentOf = (c) => c.reminders?.[key]?.sentAt;
   const client = audience.find((c) => c.id === selId) || audience.find((c) => !sentOf(c)) || audience[0];
-  const sentCount = audience.filter(sentOf).length;
+  const sentCount = fullAudience.filter(sentOf).length;
   const advance = () => {
     if (!client) return;
     const i = audience.findIndex((c) => c.id === client.id);
@@ -1039,13 +1062,17 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent }) {
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
         <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
         <span style={{ fontSize: 12.5, color: C.sub }}>Audience: {audienceHint}</span>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
+          style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
-          {sentCount}/{audience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
+          {sentCount}/{fullAudience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
         </span>
       </div>
       {!client ? (
         <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
-          No eligible recipients{skipped ? ` — ${skipped} were skipped (opted out, bounced, or missing an email)` : " for this selection"}.
+          {q.trim() && fullAudience.length
+            ? `No companies match “${q.trim()}” in this list.`
+            : `No eligible recipients${skipped ? ` — ${skipped} were skipped (opted out, bounced, or missing an email)` : " for this selection"}.`}
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(210px, 270px) 1fr", gap: 14, alignItems: "start" }}>
@@ -1940,11 +1967,37 @@ function slugify(label, existing) {
   while (BUILTIN_COMMS_KEYS.includes(key) || existing[key]) key = `${base}-${n++}`;
   return key;
 }
+// Strip an HTML email down to readable plain text for the CRM's text templates.
+function htmlToText(html) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<head[\s\S]*?<\/head>/gi, "")
+    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"')
+    .replace(/\n{3,}/g, "\n\n").split("\n").map((l) => l.trim()).join("\n").trim();
+}
+
 function EmailTemplatesPanel({ settings, onSave }) {
   const custom = settings.emailTemplates || {};
   const [editingKey, setEditingKey] = useState(null); // a real key, or "__new__"
   const [form, setForm] = useState({ label: "", subject: "", body: "" });
+  const [brevo, setBrevo] = useState(null); // null | {loading} | {templates} | {error}
   const allKeys = [...BUILTIN_COMMS_KEYS, ...Object.keys(custom).filter((k) => !BUILTIN_COMMS_KEYS.includes(k))];
+
+  const loadBrevo = async () => {
+    setBrevo({ loading: true });
+    try {
+      const r = await fetch("/api/comms/brevo-templates");
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok || d.error) { setBrevo({ error: d.error || "Couldn't load Brevo templates." }); return; }
+      setBrevo({ templates: d.templates || [] });
+    } catch { setBrevo({ error: "Couldn't reach the server." }); }
+  };
+  const importOne = (t) => {
+    const label = t.name || "Imported template";
+    const key = slugify(label, custom);
+    onSave({ ...settings, emailTemplates: { ...custom, [key]: { label, subject: t.subject || "", body: htmlToText(t.html) } } });
+  };
 
   const startEdit = (key) => {
     const ov = custom[key];
@@ -1997,6 +2050,32 @@ function EmailTemplatesPanel({ settings, onSave }) {
     );
   }
 
+  // Brevo import picker
+  if (brevo) {
+    return (
+      <div>
+        <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 8 }}>
+          <div style={{ fontSize: 13, color: C.sub }}>Import your Brevo transactional templates. HTML is converted to editable text.</div>
+          <GhostBtn onClick={() => setBrevo(null)}>← Back</GhostBtn>
+        </div>
+        {brevo.loading && <div style={{ fontSize: 13, color: C.faint }}>Loading from Brevo…</div>}
+        {brevo.error && <div style={{ fontSize: 13, color: C.red }}>{brevo.error}</div>}
+        {brevo.templates?.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No templates found in this Brevo account.</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {(brevo.templates || []).map((t) => (
+            <div key={t.id} className="flex items-center justify-between" style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", gap: 8 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</div>
+                <div style={{ fontSize: 11, color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.subject || "(no subject)"}{t.active ? "" : " · inactive"}</div>
+              </div>
+              <ImportBtn onImport={() => importOne(t)} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <p style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>These feed the Comms tab and the per-client email button. Edit the built-in ones or add your own.</p>
@@ -2004,22 +2083,39 @@ function EmailTemplatesPanel({ settings, onSave }) {
         {allKeys.map((key) => {
           const builtin = BUILTIN_COMMS_KEYS.includes(key);
           const label = custom[key]?.label || (builtin ? COMMS[key].label : key);
+          const deletable = !builtin || !!custom[key]; // custom, or an edited built-in (resets)
           return (
-            <div key={key} className="flex items-center justify-between" style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", gap: 8 }}>
+            <div key={key} className="flex items-center justify-between" style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 34px 10px 14px", gap: 8 }}>
+              {deletable && (
+                <button onClick={() => (builtin ? resetToDefault(key) : remove(key))} title={builtin ? "Reset to default wording" : "Delete template"} aria-label={builtin ? "Reset template" : "Delete template"}
+                  style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 2 }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = C.red)} onMouseLeave={(e) => (e.currentTarget.style.color = C.faint)}>✕</button>
+              )}
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</div>
                 <div style={{ fontSize: 11, color: C.faint }}>{builtin ? "Built-in" : "Custom"}{custom[key] && builtin ? " · edited" : ""}</div>
               </div>
               <div className="flex" style={{ gap: 6, flexShrink: 0 }}>
                 <GhostBtn onClick={() => startEdit(key)}>Edit</GhostBtn>
-                {!builtin && <button onClick={() => remove(key)} style={{ fontSize: 12.5, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete</button>}
               </div>
             </div>
           );
         })}
       </div>
-      <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
+      <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
+        <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
+        <GhostBtn onClick={loadBrevo}>Import from Brevo</GhostBtn>
+      </div>
     </div>
+  );
+}
+// Import button that flips to a checkmark once used, so you can see what you've already pulled in.
+function ImportBtn({ onImport }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button onClick={() => { onImport(); setDone(true); }} style={{ fontSize: 12.5, fontWeight: 600, padding: "7px 13px", borderRadius: 8, border: `1px solid ${done ? C.green : C.line}`, background: done ? C.greenBg : C.panel, color: done ? C.green : C.action, cursor: "pointer", flexShrink: 0 }}>
+      {done ? "Imported ✓" : "Import"}
+    </button>
   );
 }
 

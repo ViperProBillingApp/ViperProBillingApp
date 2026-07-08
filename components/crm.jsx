@@ -275,6 +275,8 @@ function normalise(r) {
     // silently defaulting to false, so an old cached client state can't wipe it.
     inChargeOver: r.inChargeOver === undefined ? !!(r.chargeoverId && String(r.chargeoverId).trim()) : !!r.inChargeOver,
     workflowHidden: !!r.workflowHidden,
+    maritzPortal: !!r.maritzPortal,
+    viperCustomer: !!r.viperCustomer,
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -708,22 +710,41 @@ function EmailIconMenu({ client, templates, onPick }) {
   );
 }
 
+// A dot + compact select for an editable yes/no client field (In ChargeOver,
+// Maritz Portal, Viper Customer, …) — same look everywhere it's used.
+function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
+  return (
+    <div className="flex items-center" style={{ gap: 6, minWidth: 0 }} onClick={(e) => e.stopPropagation()}>
+      <span style={{ width: 6, height: 6, borderRadius: 6, background: value ? C.green : C.faint, flexShrink: 0 }} />
+      <select value={value ? "yes" : "no"} onChange={(e) => onChange(e.target.value === "yes")}
+        title={title} style={{ fontSize: 12, fontWeight: 600, color: value ? C.green : C.faint, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
+        <option value="yes">{trueLabel}</option>
+        <option value="no">{falseLabel}</option>
+      </select>
+    </div>
+  );
+}
+
 function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
   const [co, setCo] = useState("all");
+  const [mp, setMp] = useState("all");
+  const [vc, setVc] = useState("all");
   const [owed, setOwed] = useState("all");
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
-  const activeCount = [seg, bill, stage, co, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
-  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setOwed("all"); setQ(""); };
+  const activeCount = [seg, bill, stage, co, mp, vc, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
+  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setMp("all"); setVc("all"); setOwed("all"); setQ(""); };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     if (seg !== "all") l = l.filter((c) => c.segment === seg);
     if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
     if (stage !== "all") l = l.filter((c) => c.stage === stage);
     if (co !== "all") l = l.filter((c) => (co === "yes" ? !!c.inChargeOver : !c.inChargeOver));
+    if (mp !== "all") l = l.filter((c) => (mp === "yes" ? !!c.maritzPortal : !c.maritzPortal));
+    if (vc !== "all") l = l.filter((c) => (vc === "yes" ? !!c.viperCustomer : !c.viperCustomer));
     if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0));
     if (q.trim()) {
       const k = q.toLowerCase();
@@ -733,9 +754,9 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, owed, q, showArchived]);
+  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
-  const gridCols = "1.4fr 1.2fr 0.85fr 0.85fr 0.85fr 40px";
+  const gridCols = "1.2fr 1fr 0.75fr 0.75fr 0.75fr 0.75fr 0.85fr 40px";
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -756,6 +777,8 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           <HeaderFilter label="Billing" value={bill} onChange={setBill} options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Maritz Portal" value={mp} onChange={setMp} options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
@@ -786,14 +809,9 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
                   {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
                 </select>
               </div>
-              <div className="flex items-center" style={{ gap: 6, minWidth: 0 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 6, background: c.inChargeOver ? C.green : C.faint, flexShrink: 0 }} />
-                <select value={c.inChargeOver ? "yes" : "no"} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { inChargeOver: e.target.value === "yes" })}
-                  title="In ChargeOver" style={{ fontSize: 12, fontWeight: 600, color: c.inChargeOver ? C.green : C.faint, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
-                  <option value="yes">In ChargeOver</option>
-                  <option value="no">Not in ChargeOver</option>
-                </select>
-              </div>
+              <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
+              <BoolCell value={c.maritzPortal} onChange={(v) => onUpdate(c.id, { maritzPortal: v })} trueLabel="Maritz Portal" falseLabel="Not Maritz" title="Maritz Portal" />
+              <BoolCell value={c.viperCustomer} onChange={(v) => onUpdate(c.id, { viperCustomer: v })} trueLabel="Viper Customer" falseLabel="Not Viper" title="Viper Customer" />
               <div style={{ textAlign: "right" }}>
                 {behind >= 1
                   ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>

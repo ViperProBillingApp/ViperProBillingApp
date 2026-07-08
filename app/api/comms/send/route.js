@@ -14,7 +14,8 @@ export async function POST(req) {
   if (!String(subject || "").trim() || !String(body || "").trim()) {
     return NextResponse.json({ error: "Subject and message are required." }, { status: 400 });
   }
-  const ok = await sendClientEmail(String(to), String(name || ""), String(subject), String(body));
+  // sender's uploaded signature image rides along on every outgoing template
+  const ok = await sendClientEmail(String(to), String(name || ""), String(subject), String(body), me.signature_image || "");
   if (!ok) return NextResponse.json({ error: "Send failed — Brevo not configured or rejected the message." }, { status: 502 });
   return NextResponse.json({ ok: true });
 }

@@ -28,7 +28,72 @@ function Card({ title, children }) {
   );
 }
 
-export default function UsersAdmin({ me }) {
+// Read an image file as a data URL, downscaled so it stores comfortably.
+// jpeg for photos (headshots), png for graphics (signatures, transparency).
+function readImage(file, maxDim, asPng) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        if (scale === 1 && fr.result.length < 500_000) return resolve(fr.result);
+        const cv = document.createElement("canvas");
+        cv.width = Math.max(1, Math.round(img.width * scale));
+        cv.height = Math.max(1, Math.round(img.height * scale));
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        resolve(asPng ? cv.toDataURL("image/png") : cv.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = () => reject(new Error("Not a readable image."));
+      img.src = fr.result;
+    };
+    fr.onerror = () => reject(new Error("Couldn't read the file."));
+    fr.readAsDataURL(file);
+  });
+}
+
+// Circular headshot with an upload control underneath.
+function Headshot({ src, size = 56, onPick, onClear }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, flexShrink: 0 }}>
+      <div style={{ width: size, height: size, borderRadius: "50%", overflow: "hidden", background: C.lineSoft, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {src
+          ? <img src={src} alt="headshot" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          : <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke={C.faint} strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>}
+      </div>
+      {onPick && (
+        <div style={{ display: "flex", gap: 6 }}>
+          <label style={{ fontSize: 10.5, fontWeight: 600, color: C.brand, cursor: "pointer" }}>
+            {src ? "Change" : "Upload"}
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onPick(f); }} />
+          </label>
+          {src && onClear && <button onClick={onClear} style={{ fontSize: 10.5, fontWeight: 600, color: C.faint, background: "none", border: "none", cursor: "pointer", padding: 0 }}>Remove</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Signature image upload + preview. Appended to the bottom of every outgoing email this user sends.
+function SignatureUpload({ src, onPick, onClear }) {
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 5 }}>Email signature image</div>
+      {src
+        ? <img src={src} alt="email signature" style={{ maxWidth: 220, maxHeight: 80, display: "block", borderRadius: 6, border: `1px solid ${C.lineSoft}`, background: "#fff", padding: 4 }} />
+        : <div style={{ fontSize: 12, color: C.faint }}>None — outgoing emails go out without a signature image.</div>}
+      <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
+        <label style={{ fontSize: 11.5, fontWeight: 600, color: C.brand, cursor: "pointer" }}>
+          {src ? "Replace" : "Upload"}
+          <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onPick(f); }} />
+        </label>
+        {src && <button onClick={onClear} style={{ fontSize: 11.5, fontWeight: 600, color: C.faint, background: "none", border: "none", cursor: "pointer", padding: 0 }}>Remove</button>}
+      </div>
+    </div>
+  );
+}
+
+export default function UsersAdmin({ me, embedded = false }) {
   const isAdmin = me.role === "admin";
   const [users, setUsers] = useState([]);
   const [error, setError] = useState("");
@@ -55,6 +120,53 @@ export default function UsersAdmin({ me }) {
     return d;
   };
 
+  const body = (
+    <>
+      {error && (
+        <div style={{ background: C.redBg, color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, marginBottom: 14 }}>
+          {error}
+        </div>
+      )}
+      {notice && (
+        <div style={{ background: C.greenBg, borderRadius: 10, padding: "12px 14px", fontSize: 13.5, marginBottom: 14 }}>
+          <strong style={{ color: C.green }}>{notice.title}</strong>
+          {notice.detail && (
+            <span style={{ marginLeft: 8 }}>
+              Temporary password: <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}` }}>{notice.detail}</code>
+              {" "}— shown once, hand it over securely and have them change it.
+            </span>
+          )}
+          <button onClick={() => setNotice(null)} style={{ marginLeft: 10, background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 12.5 }}>dismiss</button>
+        </div>
+      )}
+
+      {isAdmin && <AddUser onCall={call} onDone={(d) => { load(); setNotice({ title: `${d.user.email} created.`, detail: d.tempPassword }); }} />}
+
+      {isAdmin && (
+        <Card title="Staff access">
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 12 }}>
+            {users.map((u) => (
+              <StaffCard key={u.id} u={u} self={u.id === me.id} onCall={call} onChanged={load} onNotice={setNotice} />
+            ))}
+          </div>
+          {users.length === 0 && <p style={{ color: C.faint, fontSize: 13 }}>Loading…</p>}
+        </Card>
+      )}
+
+      {!isAdmin && <MyProfile onCall={call} />}
+
+      <ChangePassword onCall={call} onDone={() => setNotice({ title: "Your password was updated." })} />
+
+      <p style={{ color: C.faint, fontSize: 11.5, marginTop: 8 }}>
+        Deactivating a user keeps their account but blocks sign-in and ends their sessions. Delete is permanent.
+        Signature images are added to the bottom of every outgoing client email that user sends.
+      </p>
+    </>
+  );
+
+  // Embedded: rendered inside the CRM's centered floating window — no page chrome.
+  if (embedded) return <div style={{ fontFamily: SANS, color: C.ink }}>{body}</div>;
+
   return (
     <div style={{ minHeight: "100vh", background: C.paper, fontFamily: SANS, color: C.ink }}>
       <div className="mx-auto w-full" style={{ maxWidth: 860, padding: "clamp(16px, 3vw, 30px)" }}>
@@ -69,45 +181,32 @@ export default function UsersAdmin({ me }) {
             <button style={btn(false)} onClick={() => (window.location.href = "/")}>← Back to CRM</button>
           </div>
         </header>
-
-        {error && (
-          <div style={{ background: C.redBg, color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, marginBottom: 14 }}>
-            {error}
-          </div>
-        )}
-        {notice && (
-          <div style={{ background: C.greenBg, borderRadius: 10, padding: "12px 14px", fontSize: 13.5, marginBottom: 14 }}>
-            <strong style={{ color: C.green }}>{notice.title}</strong>
-            {notice.detail && (
-              <span style={{ marginLeft: 8 }}>
-                Temporary password: <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}` }}>{notice.detail}</code>
-                {" "}— shown once, hand it over securely and have them change it.
-              </span>
-            )}
-            <button onClick={() => setNotice(null)} style={{ marginLeft: 10, background: "none", border: "none", color: C.sub, cursor: "pointer", fontSize: 12.5 }}>dismiss</button>
-          </div>
-        )}
-
-        {isAdmin && <AddUser onCall={call} onDone={(d) => { load(); setNotice({ title: `${d.user.email} created.`, detail: d.tempPassword }); }} />}
-
-        {isAdmin && (
-          <Card title="Staff access">
-            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(310px, 1fr))", gap: 12 }}>
-              {users.map((u) => (
-                <StaffCard key={u.id} u={u} self={u.id === me.id} onCall={call} onChanged={load} onNotice={setNotice} />
-              ))}
-            </div>
-            {users.length === 0 && <p style={{ color: C.faint, fontSize: 13 }}>Loading…</p>}
-          </Card>
-        )}
-
-        <ChangePassword onCall={call} onDone={() => setNotice({ title: "Your password was updated." })} />
-
-        <p style={{ color: C.faint, fontSize: 11.5, marginTop: 8 }}>
-          Deactivating a user keeps their account but blocks sign-in and ends their sessions. Delete is permanent.
-        </p>
+        {body}
       </div>
     </div>
+  );
+}
+
+// Non-admins manage their own headshot + signature here (admins do it on their staff card).
+function MyProfile({ onCall }) {
+  const [meInfo, setMeInfo] = useState(null);
+  const load = async () => { const d = await onCall("/api/users/me", "GET"); if (d) setMeInfo(d.user); };
+  useEffect(() => { load(); }, []);
+  const patch = async (p) => { if (await onCall("/api/users/me", "PATCH", p)) load(); };
+  if (!meInfo) return null;
+  return (
+    <Card title="My profile">
+      <div className="flex" style={{ gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <Headshot src={meInfo.headshot} size={72}
+          onPick={async (f) => patch({ headshot: await readImage(f, 256, false) })}
+          onClear={() => patch({ headshot: null })} />
+        <div style={{ flex: 1, minWidth: 220 }}>
+          <SignatureUpload src={meInfo.signature_image}
+            onPick={async (f) => patch({ signature_image: await readImage(f, 720, true) })}
+            onClear={() => patch({ signature_image: null })} />
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -120,6 +219,10 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
   const smallBtn = {
     fontSize: 12.5, fontWeight: 600, padding: "7px 12px", borderRadius: 8,
     border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer",
+  };
+  // self edits go through /me (works for any role); others need the admin route
+  const patchImages = async (p) => {
+    if (await onCall(self ? "/api/users/me" : `/api/users/${u.id}`, "PATCH", p)) onChanged();
   };
 
   const save = async () => {
@@ -148,10 +251,17 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
         <button title="Remove user" aria-label={`Remove ${u.email}`} onClick={() => setConfirmRemove(true)} style={{ position: "absolute", top: 8, right: 10, background: "none", border: "none", color: C.faint, fontSize: 15, cursor: "pointer", lineHeight: 1, padding: 4 }}>✕</button>
       ))}
 
-      <div style={{ fontWeight: 700, fontSize: 14.5, paddingRight: 28 }}>
-        {u.name || "—"}{self && <span style={{ color: C.faint, fontWeight: 500 }}> (you)</span>}
+      <div className="flex" style={{ gap: 12, alignItems: "flex-start" }}>
+        <Headshot src={u.headshot} size={56}
+          onPick={async (f2) => patchImages({ headshot: await readImage(f2, 256, false) })}
+          onClear={() => patchImages({ headshot: null })} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 14.5, paddingRight: 28 }}>
+            {u.name || "—"}{self && <span style={{ color: C.faint, fontWeight: 500 }}> (you)</span>}
+          </div>
+          <div style={{ fontFamily: MONO, fontSize: 12, color: C.sub, marginTop: 2, marginBottom: 10 }}>{u.email}</div>
+        </div>
       </div>
-      <div style={{ fontFamily: MONO, fontSize: 12, color: C.sub, marginTop: 2, marginBottom: 10 }}>{u.email}</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12.5, minHeight: 22 }}>
         <span style={{ color: C.sub, fontWeight: 600 }}>Password</span>
@@ -165,7 +275,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
             </button>
           </>
         ) : (
-          <span style={{ color: C.faint }} title="This user set their own password, so it can't be shown. Use Reset password to assign a new visible one.">set by user — Reset to reveal</span>
+          <span style={{ color: C.faint }} title="This user set their own password before password display existed. Use Reset password to assign a new visible one.">set by user — Reset to reveal</span>
         )}
       </div>
 
@@ -190,6 +300,12 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
         >
           {u.active ? "Active" : "Blocked"}
         </button>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <SignatureUpload src={u.signature_image}
+          onPick={async (f2) => patchImages({ signature_image: await readImage(f2, 720, true) })}
+          onClear={() => patchImages({ signature_image: null })} />
       </div>
 
       {editing ? (
@@ -231,7 +347,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
 }
 
 function AddUser({ onCall, onDone }) {
-  const [f, setF] = useState({ email: "", name: "", role: "staff", password: "" });
+  const [f, setF] = useState({ email: "", name: "", role: "admin", password: "" });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   return (
     <Card title="Add a user">
@@ -240,8 +356,8 @@ function AddUser({ onCall, onDone }) {
         <Field label="Email"><input style={inputStyle} type="email" value={f.email} onChange={set("email")} /></Field>
         <Field label="Role">
           <select style={{ ...inputStyle, cursor: "pointer" }} value={f.role} onChange={set("role")}>
-            <option value="staff">View only</option>
             <option value="admin">Admin</option>
+            <option value="staff">View only</option>
           </select>
         </Field>
         <Field label="Password (blank = generate one)"><input style={inputStyle} value={f.password} onChange={set("password")} placeholder="auto-generate" /></Field>
@@ -251,7 +367,7 @@ function AddUser({ onCall, onDone }) {
           style={btn(true)}
           onClick={async () => {
             const d = await onCall("/api/users", "POST", { ...f, password: f.password || undefined });
-            if (d) { setF({ email: "", name: "", role: "staff", password: "" }); onDone(d); }
+            if (d) { setF({ email: "", name: "", role: "admin", password: "" }); onDone(d); }
           }}
         >
           Create user
@@ -262,20 +378,38 @@ function AddUser({ onCall, onDone }) {
 }
 
 function ChangePassword({ onCall, onDone }) {
-  const [current, setCurrent] = useState("");
+  const [current, setCurrent] = useState(null); // live visible_password (or null if unknown)
+  const [showCur, setShowCur] = useState(false);
   const [next, setNext] = useState("");
+  const load = async () => { const d = await onCall("/api/users/me", "GET"); if (d) setCurrent(d.user.visible_password); };
+  useEffect(() => { load(); }, []);
   return (
     <Card title="Change my password">
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-        <Field label="Current password"><input style={inputStyle} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Field>
+        <Field label="Current password">
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 38 }}>
+            {current ? (
+              <>
+                <code style={{ fontFamily: MONO, fontWeight: 600, fontSize: 13, background: C.panel, padding: "7px 10px", borderRadius: 8, border: `1px solid ${C.line}`, letterSpacing: showCur ? 0 : 2 }}>
+                  {showCur ? current : "••••••••"}
+                </code>
+                <button onClick={() => setShowCur((v) => !v)} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: 0 }}>
+                  {showCur ? "Hide" : "Show"}
+                </button>
+              </>
+            ) : (
+              <span style={{ fontSize: 12.5, color: C.faint }}>Not on record — set a new one below and it will show here.</span>
+            )}
+          </div>
+        </Field>
         <Field label="New password (min 8 characters)"><input style={inputStyle} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Field>
       </div>
       <div className="flex justify-end">
         <button
           style={btn(true)}
           onClick={async () => {
-            const d = await onCall("/api/users/me/password", "POST", { current, next });
-            if (d) { setCurrent(""); setNext(""); onDone(); }
+            const d = await onCall("/api/users/me/password", "POST", { next });
+            if (d) { setNext(""); setShowCur(false); load(); onDone(); }
           }}
         >
           Update password

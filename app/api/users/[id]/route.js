@@ -48,7 +48,15 @@ export async function PATCH(req, { params }) {
     await db.query("UPDATE users SET active = $1 WHERE id = $2", [!!body.active, userId]);
     if (!body.active) await destroyUserSessions(userId); // revoking access signs them out everywhere
   }
-  const { rows } = await db.query("SELECT id, email, name, role, active, created_at FROM users WHERE id = $1", [userId]);
+  // profile images (data URLs) — headshot shown on the card, signature appended to outgoing email
+  const okImg = (v) => v === null || v === "" || (typeof v === "string" && v.startsWith("data:image/") && v.length <= 900_000);
+  for (const k of ["headshot", "signature_image"]) {
+    if (body[k] !== undefined) {
+      if (!okImg(body[k])) return NextResponse.json({ error: "Image must be a data URL under ~650KB." }, { status: 400 });
+      await db.query(`UPDATE users SET ${k} = $1 WHERE id = $2`, [body[k] || null, userId]);
+    }
+  }
+  const { rows } = await db.query("SELECT id, email, name, role, active, created_at, visible_password, headshot, signature_image FROM users WHERE id = $1", [userId]);
   return NextResponse.json({ user: rows[0] });
 }
 

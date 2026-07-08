@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Papa from "papaparse";
 import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
+import UsersAdmin from "./users-admin.jsx";
 
 /* ================================================================== *
  * ViperPro — Client CRM & Collections
@@ -486,14 +487,14 @@ export default function CRM({ user }) {
   return (
     <div style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel */}
-      <aside style={{ width: 216, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.line}`, padding: "22px 14px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+      <aside style={{ width: 194, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem onClick={() => setModal("emails")}>Email templates</MenuItem>
         <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
-        <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
+        <MenuItem onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
           <MenuItem onClick={logout}>Sign out</MenuItem>
@@ -509,18 +510,18 @@ export default function CRM({ user }) {
 
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />
 
-        <div className="flex flex-wrap items-center justify-end" style={{ gap: 8, marginBottom: 14 }}>
-          <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
-          <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-          <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
-            {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
-          </span>
-        </div>
-
-        <nav className="flex" style={{ gap: 2, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
+        {/* Tab row — actions live on the same line, right-aligned */}
+        <nav className="flex items-end" style={{ gap: 3, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
           {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
             <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
           ))}
+          <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
+            <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
+            <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+            <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
+              {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
+            </span>
+          </div>
         </nav>
 
         {clients.length === 0 ? (
@@ -553,6 +554,7 @@ export default function CRM({ user }) {
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
       {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} /></Modal>}
+      {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
           ✓ {toast}
@@ -802,7 +804,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search (incl. old emails & ChargeOver ID)"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" title="Searches name, company, email, old emails and ChargeOver ID"
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
       </div>
       <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
@@ -1096,8 +1098,8 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
   const Row = ({ n, label, tint, to }) => (
-    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
-      <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, color: tint, minWidth: 26, textAlign: "right" }}>{n}</span>
+    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer" }}>
+      <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 13, color: "#fff", background: n > 0 ? tint : C.grey, width: 28, height: 28, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
       <span style={{ fontSize: 13.5 }}>{label}</span>
     </button>
   );
@@ -1191,6 +1193,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   const [note, setNote] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sc, setSc] = useState({ name: "", email: "", phone: "", role: "" });
+  const [dtab, setDtab] = useState("info"); // info | billing | portal
   const cur = client.currency || settings.currency;
   const behind = arrearsPeriods(client);
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
@@ -1198,14 +1201,18 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   return (
     <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
-        <div className="flex items-center justify-between" style={{ padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.panel, position: "sticky", top: 0, zIndex: 1 }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
+        <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px" }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>
+            <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em" }}>
               {client.company || client.name}
-              <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
-                style={{ fontSize: 11, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", marginLeft: 8, verticalAlign: "middle" }}>
-                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </select>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 3, marginLeft: 10, verticalAlign: "middle" }}>
+                <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
+                  style={{ fontSize: 11.5, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none" }}>
+                  {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <span style={{ fontSize: 8, color: SEGMENTS[client.segment].color, pointerEvents: "none" }}>▾</span>
+              </span>
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
@@ -1213,9 +1220,20 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
         </div>
-        <div style={{ padding: 20 }}>
-          {/* Identity & billing */}
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        {/* Card tabs: Info / Billing / Portal */}
+        <div className="flex" style={{ gap: 2, padding: "0 20px" }}>
+          {[["info", "Info"], ["billing", "Billing"], ["portal", "Portal"]].map(([k, t]) => (
+            <button key={k} onClick={() => setDtab(k)}
+              style={{ fontSize: 13, fontWeight: 600, padding: "8px 14px", cursor: "pointer", border: "none", background: "transparent", color: dtab === k ? C.ink : C.sub, borderBottom: `2px solid ${dtab === k ? C.action : "transparent"}`, marginBottom: -1 }}>
+              {t}
+            </button>
+          ))}
+        </div>
+        </div>
+        <div style={{ padding: "16px 20px 20px" }}>
+          {dtab === "info" && (<>
+          {/* Identity — billing status sits beside workflow stage */}
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
             <Field label="Contact name"><input style={inputStyle} value={client.name} onChange={(e) => set({ name: e.target.value })} /></Field>
             <Field label="Company"><input style={inputStyle} value={client.company} onChange={(e) => set({ company: e.target.value })} /></Field>
             <Field label="Email"><input style={inputStyle} value={client.email} onChange={(e) => set({ email: e.target.value })} /></Field>
@@ -1226,33 +1244,10 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
                 <option value="ok">Deliverable</option><option value="bounced">Bounced</option><option value="undelivered">Undelivered</option>
               </CompactSelect>
             </Field>
-            <Field label="Amount">
-              <div className="flex items-center" style={{ gap: 6 }}>
-                <input type="number" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} />
-                {client.multiOffice && (
-                  <select value={client.priceMode} onChange={(e) => set({ priceMode: e.target.value })} title="Billed per office or one group price"
-                    style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.sub, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 8px", cursor: "pointer", outline: "none" }}>
-                    <option value="per-office">Per-office</option>
-                    <option value="group">Group price</option>
-                  </select>
-                )}
-              </div>
-            </Field>
-            <Field label="Currency">
-              <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
-                <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
-              </CompactSelect>
-            </Field>
-            <Field label="Cadence">
-              <CompactSelect value={client.cadence} onChange={(e) => set({ cadence: e.target.value })}>
-                {Object.entries(CADENCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-              </CompactSelect>
-            </Field>
-            <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={client.billingDay} onChange={(e) => set({ billingDay: Number(e.target.value) })} /></Field>
+            <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
+            <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
+            <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
           </div>
-          <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
-          <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
-          <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
 
           {/* Multi-office group */}
           {client.multiOffice && (
@@ -1290,25 +1285,6 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             <textarea rows={3} style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }} value={client.notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Context, promises made, anything the next you needs to know" />
           </Field>
 
-          {/* Record payment */}
-          <Section title="Record payment">
-            <div className="flex items-end" style={{ gap: 8, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 90 }}><Field label={`Amount (${SYMBOL[cur]})`}><input type="number" style={inputStyle} value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></Field></div>
-              <div style={{ flex: 1, minWidth: 120 }}><Field label="Date"><input type="date" style={inputStyle} value={payDate} onChange={(e) => setPayDate(e.target.value)} /></Field></div>
-              <div style={{ marginBottom: 12 }}><SolidBtn onClick={() => onRecordPayment(client.id, payAmt, payDate)}>Record</SolidBtn></div>
-            </div>
-            {(client.payments || []).length > 0 && (
-              <div style={{ marginTop: 4 }}>
-                {(client.payments || []).slice(0, 6).map((p, i) => (
-                  <div key={i} className="flex justify-between" style={{ fontSize: 12.5, fontFamily: MONO, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
-                    <span style={{ color: C.sub }}>{fmtDate(p.date)}</span><span style={{ fontWeight: 600, color: C.green }}>{money(p.amount, cur)}</span>
-                  </div>
-                ))}
-                {(client.payments || []).length > 6 && <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>+ {(client.payments || []).length - 6} earlier</div>}
-              </div>
-            )}
-          </Section>
-
           {/* Secondary contacts — additional / supplier contacts with phone */}
           <Section title="Additional contacts">
             {(client.secondaryContacts || []).map((s2, i) => (
@@ -1330,13 +1306,6 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               <GhostBtn onClick={() => { if (sc.name || sc.email || sc.phone) { set({ secondaryContacts: [...(client.secondaryContacts || []), sc] }); setSc({ name: "", email: "", phone: "", role: "" }); } }}>Add</GhostBtn>
             </div>
           </Section>
-
-          {client.chargeoverId && <PastCharges client={client} />}
-
-          {/* Maritz portal pricing — shown for Maritz portal clients */}
-          {(client.segment === "maritz-portal" || client.maritzPortal) && (
-            <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
-          )}
 
           {/* Sent comms — a copy of every message sent, newest first */}
           {sentComms.length > 0 && (
@@ -1367,53 +1336,107 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               {client.archivedContacts.map((a, i) => <div key={i} style={{ fontSize: 12, color: C.faint, fontFamily: MONO, padding: "3px 0" }}>{a.email} · {a.reason}</div>)}
             </Section>
           )}
+          </>)}
 
-          {/* Legacy Viper portal access — shown for Viper Customers (or whenever creds exist) */}
-          {(client.viperCustomer || client.portalUrl || client.adminUrl || client.portalUser || client.portalPassword) && (
-            <Section title="Viper portal access">
-              <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <CredField label="Portal URL" value={client.portalUrl} onChange={(v) => set({ portalUrl: v })} placeholder="https://…" />
-                <CredField label="Admin URL" value={client.adminUrl} onChange={(v) => set({ adminUrl: v })} placeholder="https://…" />
-                <CredField label="User name" value={client.portalUser} onChange={(v) => set({ portalUser: v })} />
-                <CredField label="Password" value={client.portalPassword} onChange={(v) => set({ portalPassword: v })} />
+          {dtab === "billing" && (<>
+          {/* Costing */}
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+            <Field label="Amount">
+              <div className="flex items-center" style={{ gap: 6 }}>
+                <input type="number" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} />
+                {client.multiOffice && (
+                  <select value={client.priceMode} onChange={(e) => set({ priceMode: e.target.value })} title="Billed per office or one group price"
+                    style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.sub, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 8px", cursor: "pointer", outline: "none" }}>
+                    <option value="per-office">Per-office</option>
+                    <option value="group">Group price</option>
+                  </select>
+                )}
               </div>
-              <div className="flex" style={{ gap: 8, marginTop: 4 }}>
-                {client.portalUrl && <a href={client.portalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
-                {client.adminUrl && <a href={client.adminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
-              </div>
-            </Section>
-          )}
-
-          {/* Portal user lists — captured employee lists, dated for change-tracking */}
-          {(client.userLists || []).length > 0 && (
-            <PortalUsers client={client} onUpdate={(patch) => set(patch)} />
-          )}
+            </Field>
+            <Field label="Currency">
+              <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
+                <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+              </CompactSelect>
+            </Field>
+            <Field label="Cadence">
+              <CompactSelect value={client.cadence} onChange={(e) => set({ cadence: e.target.value })}>
+                {Object.entries(CADENCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </CompactSelect>
+            </Field>
+            <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={client.billingDay} onChange={(e) => set({ billingDay: Number(e.target.value) })} /></Field>
+          </div>
 
           {/* Viper subscription — user count + tiered pricing, for Viper customers */}
           {(client.segment === "viper-current" || client.viperCustomer) && (
             <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} />
           )}
 
-          {/* Archive / delete */}
-          <div className="flex items-center" style={{ gap: 8, marginTop: 22, flexWrap: "wrap" }}>
-            <GhostBtn onClick={() => onUpdateWithLog(client.id, { archivedClient: !client.archivedClient }, "archive", client.archivedClient ? "Client restored" : "Client archived")}>
-              {client.archivedClient ? "Restore client" : "Archive client"}
-            </GhostBtn>
-            {!confirmDelete ? (
-              <button onClick={() => setConfirmDelete(true)} style={{ fontSize: 12.5, color: C.red, background: "none", border: `1px solid ${C.redBg}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Delete permanently…</button>
-            ) : (
-              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: C.red }}>This can't be undone — Archive is reversible.</span>
-                <button onClick={() => onDelete(client.id)} style={{ fontSize: 12.5, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Confirm delete</button>
-                <button onClick={() => setConfirmDelete(false)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
+          {/* Maritz portal pricing — shown for Maritz portal clients */}
+          {(client.segment === "maritz-portal" || client.maritzPortal) && (
+            <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
+          )}
+
+          {client.chargeoverId && <PastCharges client={client} />}
+
+          {/* Record payment */}
+          <Section title="Record payment">
+            <div className="flex items-end" style={{ gap: 8, flexWrap: "wrap" }}>
+              <div style={{ flex: 1, minWidth: 90 }}><Field label={`Amount (${SYMBOL[cur]})`}><input type="number" style={inputStyle} value={payAmt} onChange={(e) => setPayAmt(e.target.value)} /></Field></div>
+              <div style={{ flex: 1, minWidth: 120 }}><Field label="Date"><input type="date" style={inputStyle} value={payDate} onChange={(e) => setPayDate(e.target.value)} /></Field></div>
+              <div style={{ marginBottom: 12 }}><SolidBtn onClick={() => onRecordPayment(client.id, payAmt, payDate)}>Record</SolidBtn></div>
+            </div>
+            {(client.payments || []).length > 0 && (
+              <div style={{ marginTop: 4 }}>
+                {(client.payments || []).slice(0, 6).map((p, i) => (
+                  <div key={i} className="flex justify-between" style={{ fontSize: 12.5, fontFamily: MONO, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
+                    <span style={{ color: C.sub }}>{fmtDate(p.date)}</span><span style={{ fontWeight: 600, color: C.green }}>{money(p.amount, cur)}</span>
+                  </div>
+                ))}
+                {(client.payments || []).length > 6 && <div style={{ fontSize: 11, color: C.faint, marginTop: 4 }}>+ {(client.payments || []).length - 6} earlier</div>}
               </div>
             )}
+          </Section>
+          </>)}
+
+          {dtab === "portal" && (<>
+          {/* Legacy Viper portal access */}
+          <Section title="Viper portal access">
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+              <CredField label="Portal URL" value={client.portalUrl} onChange={(v) => set({ portalUrl: v })} placeholder="https://…" />
+              <CredField label="Admin URL" value={client.adminUrl} onChange={(v) => set({ adminUrl: v })} placeholder="https://…" />
+              <CredField label="User name" value={client.portalUser} onChange={(v) => set({ portalUser: v })} />
+              <CredField label="Password" value={client.portalPassword} onChange={(v) => set({ portalPassword: v })} />
+            </div>
+            <div className="flex" style={{ gap: 8, marginTop: 4 }}>
+              {client.portalUrl && <a href={client.portalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
+              {client.adminUrl && <a href={client.adminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
+            </div>
+          </Section>
+
+          {/* Portal user lists — captured employee lists, dated for change-tracking */}
+          <PortalUsers client={client} onUpdate={(patch) => set(patch)} />
+          </>)}
+
+          {/* Archive / delete / former customer — one shared button style, left-aligned */}
+          <div className="flex items-center" style={{ gap: 8, marginTop: 20, flexWrap: "wrap", paddingTop: 14, borderTop: `1px solid ${C.lineSoft}` }}>
+            <button onClick={() => onUpdateWithLog(client.id, { archivedClient: !client.archivedClient }, "archive", client.archivedClient ? "Client restored" : "Client archived")} style={footBtn()}>
+              {client.archivedClient ? "Restore client" : "Archive client"}
+            </button>
             <button
               onClick={() => onUpdateWithLog(client.id, { formerCustomer: !client.formerCustomer }, "status", client.formerCustomer ? "Reinstated as customer" : "Marked no longer a customer")}
               title={client.formerCustomer ? "Reinstate as a current customer" : "Mark as no longer a customer"}
-              style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: client.formerCustomer ? C.sub : C.red, background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}>
+              style={footBtn(client.formerCustomer ? null : C.red)}>
               {client.formerCustomer ? "↩ Reinstate customer" : "No longer a customer"}
             </button>
+            {!confirmDelete ? (
+              <button onClick={() => setConfirmDelete(true)} style={footBtn(C.red)}>Delete permanently…</button>
+            ) : (
+              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: C.red }}>This can't be undone — Archive is reversible.</span>
+                <button onClick={() => onDelete(client.id)} style={{ ...footBtn(C.red), background: C.red, color: "#fff", border: "none" }}>Confirm delete</button>
+                <button onClick={() => setConfirmDelete(false)} style={footBtn()}>Cancel</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1699,7 +1722,24 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
 }
 function Pill({ fg, bg, children }) { return <span style={{ fontSize: 11.5, fontWeight: 600, color: fg, background: bg, padding: "3px 9px", borderRadius: 20, display: "inline-block" }}>{children}</span>; }
 function MiniPill({ fg, bg, children }) { return <span style={{ fontSize: 10, fontWeight: 700, color: fg, background: bg, padding: "1px 7px", borderRadius: 10 }}>{children}</span>; }
-function Tab({ active, onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13.5, fontWeight: 600, padding: "9px 14px", cursor: "pointer", border: "none", background: "transparent", color: active ? C.ink : C.sub, borderBottom: `2px solid ${active ? C.action : "transparent"}`, marginBottom: -1 }}>{children}</button>; }
+// Raised "real tab" look: active tab lifts up and fuses with the content edge;
+// inactive tabs sit lower on a recessed base.
+function Tab({ active, onClick, children }) {
+  return (
+    <button onClick={onClick} style={{
+      fontSize: 13.5, fontWeight: 600, padding: active ? "10px 18px 11px" : "8px 16px", cursor: "pointer",
+      border: `1px solid ${C.line}`, borderBottom: "none",
+      borderRadius: "10px 10px 0 0",
+      background: active ? C.panel : C.lineSoft,
+      color: active ? C.ink : C.sub,
+      marginBottom: -1, position: "relative", top: active ? 0 : 2,
+      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -4px 6px -4px rgba(34,48,76,0.18)",
+      transition: "all 0.12s ease-out", zIndex: active ? 2 : 1,
+    }}>
+      {children}
+    </button>
+  );
+}
 function MiniBtn({ solid, onClick, children }) { return <button onClick={onClick} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{children}</button>; }
 function SolidBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: "pointer", border: "none", background: C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
@@ -1727,7 +1767,7 @@ function ToggleSwitch({ checked, onChange, label }) {
     </label>
   );
 }
-function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 12 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 5 }}>{label}</span>{children}</label>; }
+function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 4 }}>{label}</span>{children}</label>; }
 // Editable credential field with a one-tap copy button (copies just this value).
 function CredField({ label, value, onChange, placeholder }) {
   const [copied, setCopied] = useState(false);
@@ -1748,6 +1788,8 @@ function CredField({ label, value, onChange, placeholder }) {
   );
 }
 const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
+// Uniform footer button on the client card; pass an accent for destructive actions.
+const footBtn = (accent) => ({ fontSize: 12.5, fontWeight: 600, color: accent || C.ink, background: C.panel, border: `1px solid ${accent ? accent + "66" : C.line}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" });
 
 function EmptyState({ onImport, onSample }) {
   return (
@@ -1933,10 +1975,10 @@ function EmailTemplatesPanel({ settings, onSave }) {
   );
 }
 
-function Modal({ title, onClose, children }) {
+function Modal({ title, onClose, children, wide }) {
   return (
     <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: 540, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}` }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>

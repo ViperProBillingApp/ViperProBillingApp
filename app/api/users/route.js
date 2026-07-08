@@ -14,7 +14,7 @@ export async function GET() {
   if (err) return err;
   const db = await getDb();
   const { rows } = await db.query(
-    "SELECT id, email, name, role, active, created_at, visible_password FROM users ORDER BY created_at"
+    "SELECT id, email, name, role, active, created_at, visible_password, headshot, signature_image FROM users ORDER BY created_at"
   );
   return NextResponse.json({ users: rows });
 }

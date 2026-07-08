@@ -292,6 +292,9 @@ function normalise(r) {
     portalPassword: r.portalPassword || "",
     formerCustomer: !!r.formerCustomer,
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
+    multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
+    officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
+    priceMode: r.priceMode === "group" ? "group" : "per-office", // per-office billing vs one group price
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -529,7 +532,8 @@ export default function CRM({ user }) {
       </div>
       </main>
 
-      {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }} />}
+      {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
+        officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
@@ -1165,7 +1169,7 @@ function PastCharges({ client }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, officeSiblings = [], onOpen }) {
   const set = (patch) => onUpdate(client.id, patch);
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
   const [payAmt, setPayAmt] = useState(client.amount);
@@ -1208,7 +1212,18 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
                 <option value="ok">Deliverable</option><option value="bounced">Bounced</option><option value="undelivered">Undelivered</option>
               </CompactSelect>
             </Field>
-            <Field label="Amount"><input type="number" style={inputStyle} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} /></Field>
+            <Field label="Amount">
+              <div className="flex items-center" style={{ gap: 6 }}>
+                <input type="number" style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount} onChange={(e) => set({ amount: Number(e.target.value) })} />
+                {client.multiOffice && (
+                  <select value={client.priceMode} onChange={(e) => set({ priceMode: e.target.value })} title="Billed per office or one group price"
+                    style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.sub, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 8px", cursor: "pointer", outline: "none" }}>
+                    <option value="per-office">Per-office</option>
+                    <option value="group">Group price</option>
+                  </select>
+                )}
+              </div>
+            </Field>
             <Field label="Currency">
               <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
                 <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
@@ -1224,6 +1239,28 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
           <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
           <Field label="Follow up on"><input type="date" style={inputStyle} value={client.followUp} onChange={(e) => set({ followUp: e.target.value })} /></Field>
+
+          {/* Multi-office group */}
+          {client.multiOffice && (
+            <div style={{ background: C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "10px 12px", marginBottom: 12 }}>
+              <div className="flex items-center justify-between" style={{ gap: 8 }}>
+                <span style={{ fontSize: 12.5 }}><span style={{ fontWeight: 700 }}>Multi-office</span> · group <span style={{ fontWeight: 600, color: C.action }}>{client.officeGroup || "—"}</span></span>
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: client.priceMode === "group" ? C.action : C.sub }}>{client.priceMode === "group" ? "Group price" : "Per-office"}</span>
+              </div>
+              {client.priceMode === "group" && (
+                <div style={{ marginTop: 8 }}>
+                  <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 4 }}>Covered by this group price — {officeSiblings.length} other office{officeSiblings.length === 1 ? "" : "s"}:</div>
+                  {officeSiblings.length === 0
+                    ? <div style={{ fontSize: 12, color: C.faint }}>No other offices linked to “{client.officeGroup}”.</div>
+                    : officeSiblings.map((o) => (
+                      <button key={o.id} onClick={() => onOpen?.(o.id)} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: `1px solid ${C.lineSoft}`, padding: "5px 2px", cursor: "pointer", fontSize: 12.5, color: C.ink }}>
+                        {o.company}{o.priceMode === "group" ? "" : <span style={{ color: C.faint }}> · own price {money(o.amount, o.currency || settings.currency)}</span>}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Tags */}
           <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginTop: 4, marginBottom: 8 }}>Tags</div>

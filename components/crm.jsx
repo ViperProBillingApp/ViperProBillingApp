@@ -281,6 +281,8 @@ function normalise(r) {
     adminUrl: (r.adminUrl || "").trim(),
     portalUser: (r.portalUser || "").trim(),
     portalPassword: r.portalPassword || "",
+    formerCustomer: !!r.formerCustomer,
+    userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
@@ -461,12 +463,12 @@ export default function CRM({ user }) {
       {/* Left navigation panel */}
       <aside style={{ width: 216, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.line}`, padding: "22px 14px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
-        <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <MenuItem onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem onClick={() => setModal("emails")}>Email templates</MenuItem>
         <MenuItem onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
+        <MenuItem onClick={() => (window.location.href = "/users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
         <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
           <MenuItem onClick={logout}>Sign out</MenuItem>
@@ -800,7 +802,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
                   {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
                   {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
                 </div>
-                <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.email || "no email"}{c.chargeoverId ? ` · CO#${c.chargeoverId}` : ""}</div>
+                {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
               </div>
               <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                 <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
@@ -1063,7 +1065,7 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
   const Row = ({ n, label, tint, to }) => (
-    <button onClick={() => onGo(to)} className="flex items-center justify-between" style={{ width: "100%", textAlign: "left", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
+    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 10, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px", cursor: "pointer" }}>
       <span style={{ fontSize: 13.5 }}>{label}</span>
       <span style={{ fontFamily: MONO, fontWeight: 600, fontSize: 15, color: tint }}>{n}</span>
     </button>
@@ -1154,7 +1156,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 520, height: "100%", overflow: "auto", boxShadow: "-20px 0 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "16px 20px", borderBottom: `1px solid ${C.line}`, background: C.panel, position: "sticky", top: 0, zIndex: 1 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>{client.company || client.name}{client.archivedClient ? " · archived" : ""}</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 700 }}>{client.company || client.name}{client.archivedClient ? " · archived" : ""}{client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}</h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
@@ -1293,8 +1295,13 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             </Section>
           )}
 
+          {/* Portal user lists — captured employee lists, dated for change-tracking */}
+          {(client.userLists || []).length > 0 && (
+            <PortalUsers client={client} onUpdate={(patch) => set(patch)} />
+          )}
+
           {/* Archive / delete */}
-          <div className="flex" style={{ gap: 8, marginTop: 22, flexWrap: "wrap" }}>
+          <div className="flex items-center" style={{ gap: 8, marginTop: 22, flexWrap: "wrap" }}>
             <GhostBtn onClick={() => onUpdateWithLog(client.id, { archivedClient: !client.archivedClient }, "archive", client.archivedClient ? "Client restored" : "Client archived")}>
               {client.archivedClient ? "Restore client" : "Archive client"}
             </GhostBtn>
@@ -1307,6 +1314,12 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
                 <button onClick={() => setConfirmDelete(false)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
               </div>
             )}
+            <button
+              onClick={() => onUpdateWithLog(client.id, { formerCustomer: !client.formerCustomer }, "status", client.formerCustomer ? "Reinstated as customer" : "Marked no longer a customer")}
+              title={client.formerCustomer ? "Reinstate as a current customer" : "Mark as no longer a customer"}
+              style={{ marginLeft: "auto", fontSize: 11.5, fontWeight: 600, color: client.formerCustomer ? C.sub : C.red, background: "none", border: "none", cursor: "pointer", padding: "8px 4px" }}>
+              {client.formerCustomer ? "↩ Reinstate customer" : "No longer a customer"}
+            </button>
           </div>
         </div>
       </div>
@@ -1341,6 +1354,86 @@ function Section({ title, children }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: C.ink, marginBottom: 8 }}>{title}</div>
       {children}
     </div>
+  );
+}
+
+// Columns of a captured portal user list, matching the admin "All Employees" table.
+const USERLIST_COLS = ["Name", "Title", "Primary Office", "Admin", "Data Admin", "Terminated", "Expired", "Last Login"];
+// Plain-text block of a user list for pasting into an email to the client.
+function userListToText(client, list) {
+  const lines = [`${client.company || client.name} — portal users (collected ${fmtDate(list.collectedAt)})`, ""];
+  for (const u of list.users || []) {
+    const name = u[0] || "";
+    const title = u[1] ? ` — ${u[1]}` : "";
+    const last = u[7] && u[7] !== "-" ? ` (last login ${u[7]})` : "";
+    if (name) lines.push(`• ${name}${title}${last}`);
+  }
+  lines.push("", `${(list.users || []).length} users`);
+  return lines.join("\n");
+}
+// One captured user list: dated header, copy-for-email, archive/delete, expandable table.
+function UserListBlock({ client, list, onArchive, onDelete }) {
+  const [open, setOpen] = useState(!list.archived);
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard?.writeText(userListToText(client, list)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: list.archived ? 0.6 : 1 }}>
+      <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.ink }}>
+          {open ? "▾" : "▸"} Collected {fmtDate(list.collectedAt)}
+        </button>
+        <span style={{ fontSize: 11.5, color: C.faint }}>{(list.users || []).length} users{list.archived ? " · archived" : ""}</span>
+        <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
+          <button onClick={copy} title="Copy user list for an email" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 600, color: copied ? C.green : C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+            {copied ? "Copied" : "Copy"}
+          </button>
+          <button onClick={onArchive} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>{list.archived ? "Unarchive" : "Archive"}</button>
+          <button onClick={onDelete} style={{ fontSize: 11.5, fontWeight: 600, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete</button>
+        </div>
+      </div>
+      {open && (
+        <div style={{ overflowX: "auto", marginTop: 8 }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 11.5 }}>
+            <thead><tr>{USERLIST_COLS.map((c) => <th key={c} style={{ textAlign: "left", color: C.sub, fontWeight: 600, padding: "4px 8px", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{c}</th>)}</tr></thead>
+            <tbody>
+              {(list.users || []).map((u, i) => (
+                <tr key={i}>{u.map((cell, j) => <td key={j} style={{ padding: "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: cell && cell !== "-" ? C.ink : C.faint, whiteSpace: "nowrap" }}>{cell && cell !== "-" ? cell : "—"}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+function PortalUsers({ client, onUpdate }) {
+  const lists = client.userLists || [];
+  const setLists = (next) => onUpdate({ userLists: next });
+  const active = lists.filter((l) => !l.archived);
+  const archived = lists.filter((l) => l.archived);
+  const [showArchived, setShowArchived] = useState(false);
+  return (
+    <Section title="Portal users">
+      {active.map((list) => (
+        <UserListBlock key={list.id} client={client} list={list}
+          onArchive={() => setLists(lists.map((l) => (l.id === list.id ? { ...l, archived: true } : l)))}
+          onDelete={() => setLists(lists.filter((l) => l.id !== list.id))} />
+      ))}
+      {active.length === 0 && archived.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No user lists captured yet.</div>}
+      {archived.length > 0 && (
+        <>
+          <button onClick={() => setShowArchived((s) => !s)} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer", padding: "4px 0" }}>
+            {showArchived ? "Hide" : "Show"} {archived.length} archived list{archived.length > 1 ? "s" : ""}
+          </button>
+          {showArchived && archived.map((list) => (
+            <UserListBlock key={list.id} client={client} list={list}
+              onArchive={() => setLists(lists.map((l) => (l.id === list.id ? { ...l, archived: false } : l)))}
+              onDelete={() => setLists(lists.filter((l) => l.id !== list.id))} />
+          ))}
+        </>
+      )}
+    </Section>
   );
 }
 function Pill({ fg, bg, children }) { return <span style={{ fontSize: 11.5, fontWeight: 600, color: fg, background: bg, padding: "3px 9px", borderRadius: 20, display: "inline-block" }}>{children}</span>; }

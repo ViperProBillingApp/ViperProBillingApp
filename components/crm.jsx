@@ -23,6 +23,7 @@ const BILLING = {
   "current-pricing": { label: "Up to date · current pricing", color: C.green, bg: C.greenBg },
   "old-pricing": { label: "Up to date · old pricing", color: C.amber, bg: C.amberBg },
   "not-up-to-date": { label: "Not up to date", color: C.red, bg: C.redBg },
+  "needs-co-update": { label: "Need to update in ChargeOver", color: "#3B5BA5", bg: "#E7EDF8" },
   "never-charged": { label: "Never charged", color: C.grey, bg: C.greyBg },
   "payment-failed": { label: "Payment failed", color: C.red, bg: C.redBg },
   "no-payment-method": { label: "No payment method", color: C.amber, bg: C.amberBg },
@@ -66,6 +67,20 @@ function firstName(n) { return (n || "there").trim().split(/\s+/)[0]; }
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function monthIndex(d) { return d.getFullYear() * 12 + d.getMonth(); }
 
+// A group member whose billing is carried by the group's master card:
+// it owes nothing itself and never gets reminders.
+function coveredByGroup(c) {
+  return !!(c.multiOffice && c.priceMode === "group" && !c.groupBillingMaster);
+}
+// Group pricing tiers by linked-office count (monthly / annual, editable globally).
+const GROUP_TIER_DEFAULTS = { t1m: 40, t1y: 400, t2m: 100, t2y: 1000, t3m: 150, t3y: 1500, t4m: 200, t4y: 2000 };
+function groupTierFor(count, t = GROUP_TIER_DEFAULTS) {
+  if (count <= 1) return { m: t.t1m, y: t.t1y, label: "Single office" };
+  if (count <= 5) return { m: t.t2m, y: t.t2y, label: "2–5 offices" };
+  if (count <= 10) return { m: t.t3m, y: t.t3y, label: "6–10 offices" };
+  return { m: t.t4m, y: t.t4y, label: "11+ offices" };
+}
+
 function lastPaymentDate(c) {
   let best = parseDate(c.lastPaid);
   for (const p of c.payments || []) { const d = parseDate(p.date); if (d && (!best || d > best)) best = d; }
@@ -74,6 +89,7 @@ function lastPaymentDate(c) {
 // How many billing periods is this client behind? 0 = current.
 // Single source of truth for "who owes what" — do not duplicate elsewhere.
 function periodsBehind(c, now = new Date()) {
+  if (coveredByGroup(c)) return 0; // billed via the group's master card
   if (["never-charged", "marked-deletion"].includes(c.billingStatus)) return 0;
   if (c.stage === "marked-deletion") return 0;
   const cad = CADENCE[c.cadence]?.months || 1;
@@ -91,6 +107,7 @@ function periodsBehind(c, now = new Date()) {
 // without depending on billingDay/lastPaid bookkeeping being accurate. This is
 // what makes "final notice" and "total owed" trustworthy for synced clients.
 function arrearsPeriods(c, now = new Date()) {
+  if (coveredByGroup(c)) return 0;
   if (c.coBalance != null && Number(c.amount) > 0) {
     if (c.coBalance <= 0) return 0;
     return Math.max(1, Math.min(24, Math.round(c.coBalance / Number(c.amount))));
@@ -98,6 +115,7 @@ function arrearsPeriods(c, now = new Date()) {
   return periodsBehind(c, now);
 }
 function totalOwed(c, now = new Date()) {
+  if (coveredByGroup(c)) return 0;
   if (c.coBalance != null) return Math.max(0, c.coBalance);
   return periodsBehind(c, now) * (Number(c.amount) || 0);
 }
@@ -105,6 +123,7 @@ function totalOwed(c, now = new Date()) {
 // amounts — the ChargeOver billing status is the reliable signal for CSV-imported
 // clients, so either counts.
 function needsReminder(c, now = new Date()) {
+  if (coveredByGroup(c)) return false;
   if (["never-charged", "marked-deletion"].includes(c.billingStatus) || c.stage === "marked-deletion") return false;
   return arrearsPeriods(c, now) >= 1 || ["not-up-to-date", "payment-failed"].includes(c.billingStatus);
 }
@@ -115,7 +134,7 @@ function escalationOf(c) {
   if (n === 1) return { level: 1, label: "Reminder", color: C.amber };
   return null;
 }
-function monthlyValue(c) { return (Number(c.amount) || 0) / (CADENCE[c.cadence]?.months || 1); }
+function monthlyValue(c) { return coveredByGroup(c) ? 0 : (Number(c.amount) || 0) / (CADENCE[c.cadence]?.months || 1); }
 // Compare calendar dates as "YYYY-MM-DD" strings, not Date objects — a
 // date-only string parses as UTC midnight, which can read as "not due yet"
 // or "already due" depending on the browser's timezone offset from UTC.
@@ -274,6 +293,7 @@ function normalise(r) {
     segment: SEGMENTS[r.segment] ? r.segment : (r.segment === "maritz-viper-portal" ? "maritz-portal" : "viper-current"),
     billingStatus: BILLING[r.billingStatus] ? r.billingStatus : "never-charged",
     stage: STAGES[r.stage] ? r.stage : "not-contacted",
+    stageAt: r.stageAt || "", // when the stage last changed — drives the 10-day awaiting-reply bounce-back
     tags: Array.isArray(r.tags) ? r.tags.filter((t) => TAGS[t]) : [],
     amount: Number(r.amount) || 0,
     billingDay: Math.min(28, Math.max(1, Number(r.billingDay) || 1)),
@@ -296,6 +316,7 @@ function normalise(r) {
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
     officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
     priceMode: r.priceMode === "group" ? "group" : "per-office", // per-office billing vs one group price
+    groupBillingMaster: !!r.groupBillingMaster, // the ONE office that carries the group price
     // Maritz portal per-company billing choices (prices themselves are global in settings)
     maritzBilling: { cadence: r.maritzBilling?.cadence === "annual" ? "annual" : "monthly", includeSetup: !!r.maritzBilling?.includeSetup },
     lastPaid: (r.lastPaid || "").trim(),
@@ -355,7 +376,7 @@ export default function CRM({ user }) {
     // Global pricing — edited on any Viper/Maritz card, applies to every card of that type.
     viperPricing: { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 },
     maritzPricing: { monthly: 40, annual: 400, setupFee: 140 },
-    maritzGroupPricing: {}, // per office-group: { [group]: { singleOffice, group } }
+    maritzGroupTiers: { ...GROUP_TIER_DEFAULTS }, // group pricing by office count — global
   });
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
@@ -408,13 +429,43 @@ export default function CRM({ user }) {
           ...s, ...d.settings,
           viperPricing: { ...s.viperPricing, ...(d.settings.viperPricing || {}) },
           maritzPricing: { ...s.maritzPricing, ...(d.settings.maritzPricing || {}) },
-          maritzGroupPricing: d.settings.maritzGroupPricing || {},
+          maritzGroupTiers: { ...GROUP_TIER_DEFAULTS, ...(d.settings.maritzGroupTiers || {}) },
         }));
         revRef.current = d.rev || 0;
       } catch (e) { /* first run / offline — start empty */ }
       finally { setLoaded(true); }
     })();
   }, []);
+
+  // Workflow automations, run once per session after load:
+  // 1. A due follow-up date pulls the card into "Need to contact" (and back onto the board).
+  // 2. "Contacted · awaiting reply" with no stage change for 10 days returns to
+  //    "Need to contact", logging the last communication date.
+  useEffect(() => {
+    if (!loaded) return;
+    const now = new Date();
+    const MS10 = 10 * 86400000;
+    setClients((p) => {
+      let changed = false;
+      const next = p.map((c) => {
+        if (c.archivedClient || c.formerCustomer) return c;
+        if (followUpDue(c, now) && !["need-to-contact", "contacted-awaiting", "marked-deletion"].includes(c.stage)) {
+          changed = true;
+          return { ...c, stage: "need-to-contact", stageAt: now.toISOString(), followUp: "", workflowHidden: false, activity: logActivity(c, "stage", `Follow-up date ${fmtDate(c.followUp)} reached, moved to Need to contact`) };
+        }
+        if (c.stage === "contacted-awaiting") {
+          const t = parseDate(c.stageAt) || parseDate(c.createdAt);
+          if (t && now - t >= MS10) {
+            changed = true;
+            const lastComm = Object.values(c.reminders || {}).map((v) => v.sentAt).filter(Boolean).sort().pop();
+            return { ...c, stage: "need-to-contact", stageAt: now.toISOString(), activity: logActivity(c, "stage", `No reply in 10 days, returned to Need to contact${lastComm ? ` · last communication ${fmtDate(lastComm)}` : ""}`) };
+          }
+        }
+        return c;
+      });
+      return changed ? next : p;
+    });
+  }, [loaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -464,7 +515,15 @@ export default function CRM({ user }) {
   // stable identity so memoized rows don't re-render when unrelated state changes
   const openCompose = useCallback((id, type) => { setComposeId(id); setComposeType(type || "reminder"); }, []);
   const updateWithLog = useCallback((id, patch, type, text) => {
-    setClients((p) => p.map((c) => (c.id === id ? { ...c, ...patch, activity: logActivity(c, type, text) } : c)));
+    setClients((p) => p.map((c) => {
+      if (c.id !== id) return c;
+      // Stage changes stamp stageAt (10-day bounce-back clock); reaching
+      // "Up to date" also removes the card from the workflow board.
+      const stageExtras = patch.stage && patch.stage !== c.stage
+        ? { stageAt: new Date().toISOString(), ...(patch.stage === "up-to-date" ? { workflowHidden: true } : {}) }
+        : {};
+      return { ...c, ...patch, ...stageExtras, activity: logActivity(c, type, text) };
+    }));
   }, []);
 
   const applyContact = useCallback((id, cand) => {
@@ -525,10 +584,14 @@ export default function CRM({ user }) {
 
       <main style={{ flex: 1, minWidth: 0 }}>
       <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
-        <header style={{ marginBottom: 14 }}>
-          <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
-          {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
-        </header>
+        {/* Metrics band: lighter than the page so the raised tabs below stand out */}
+        <div style={{ background: "#F8FAFD", border: `1px solid ${C.lineSoft}`, borderRadius: 12, padding: "14px 16px 4px", marginBottom: 14 }}>
+          <header style={{ marginBottom: 12 }}>
+            <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
+            {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
+          </header>
+          <StatStrip clients={active} settings={settings} bounced={bounced.length} />
+        </div>
 
         {saveState === "stale" && (
           <div className="flex items-center justify-between" style={{ gap: 12, background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
@@ -540,8 +603,6 @@ export default function CRM({ user }) {
             </button>
           </div>
         )}
-
-        <StatStrip clients={active} settings={settings} bounced={bounced.length} />
 
         {/* Tab row — actions live on the same line, right-aligned */}
         <nav className="flex items-end" style={{ gap: 3, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
@@ -580,13 +641,14 @@ export default function CRM({ user }) {
       </main>
 
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
+        onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
-      {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} /></Modal>}
+      {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} user={user} /></Modal>}
       {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
@@ -706,7 +768,10 @@ function StatStrip({ clients, settings, bounced }) {
       // Prefer ChargeOver's own balance (live from last sync) over the
       // periods×amount estimate — that estimate is only as good as `amount`,
       // which most imported clients don't have set.
-      if (c.coBalance != null) {
+      if (coveredByGroup(c)) {
+        if (c.coBalance != null) synced++;
+        // billed via group master — its own balance never counts as owed
+      } else if (c.coBalance != null) {
         synced++;
         if (c.coBalance > 0) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + c.coBalance; }
       } else {
@@ -832,6 +897,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
           {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
           {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
           {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
+          {c.priceMode === "group" && c.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
         </div>
         {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
       </div>
@@ -851,12 +917,14 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
       <BoolCell value={c.maritzPortal} onChange={(v) => onUpdate(c.id, { maritzPortal: v })} trueLabel="Maritz Portal" falseLabel="Not Maritz" title="Maritz Portal" />
       <BoolCell value={c.viperCustomer} onChange={(v) => onUpdate(c.id, { viperCustomer: v })} trueLabel="Viper Customer" falseLabel="Not Viper" title="Viper Customer" />
       <div style={{ textAlign: "right" }}>
-        {behind >= 1
-          ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
-          : needsReminder(c)
-            ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
-            : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
-        {Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
+        {coveredByGroup(c)
+          ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.faint, fontWeight: 600 }} title="Billed via the group card">via group</div>
+          : behind >= 1
+            ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
+            : needsReminder(c)
+              ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
+              : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
+        {!coveredByGroup(c) && Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
       </div>
       <div style={{ textAlign: "right" }}>
         <EmailIconMenu client={c} templates={templates} onPick={(type) => onEmail(c.id, type)} />
@@ -955,7 +1023,8 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
         </label>
       )}
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
-        {STAGE_ORDER.map((stage) => {
+        {/* "Up to date" cards leave the board automatically, so no column for it */}
+        {STAGE_ORDER.filter((s) => s !== "up-to-date").map((stage) => {
           const col = visible.filter((c) => c.stage === stage);
           return (
             <div key={stage}
@@ -984,6 +1053,11 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
                       <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
                       <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{arrearsPeriods(c) ? ` · ${arrearsPeriods(c)}p behind` : ""}</div>
                       {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
+                      {c.stage === "contacted-awaiting" && (() => {
+                        const t = parseDate(c.stageAt) || parseDate(c.createdAt);
+                        const left = t ? Math.max(0, 10 - Math.floor((Date.now() - t) / 86400000)) : 10;
+                        return <div style={{ fontSize: 10.5, color: left <= 2 ? C.amber : C.faint, marginTop: 2 }}>Auto-returns to Need to contact in {left}d</div>;
+                      })()}
                     </button>
                     {!showHidden && (
                       <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
@@ -1061,12 +1135,20 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
+  const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper
   const [q, setQ] = useState("");
   const key = `${type}:${periodKey()}`;
 
   const [fullAudience, skipped] = useMemo(() => {
     let l;
-    if (type === "deletion") {
+    if (aud !== "auto") {
+      // Explicit audience: a billing status, or a customer group.
+      l = clients.filter((c) =>
+        aud === "grp:maritz" ? c.maritzPortal :
+        aud === "grp:viper" ? c.viperCustomer :
+        c.billingStatus === aud.slice(5));
+      l = [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || (a.company || a.name).localeCompare(b.company || b.name));
+    } else if (type === "deletion") {
       l = clients.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
     } else {
       l = clients.filter((c) => c.stage !== "marked-deletion");
@@ -1076,7 +1158,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     const before = l.length;
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
     return [l, before - l.length];
-  }, [clients, type]);
+  }, [clients, type, aud]);
 
   // Search narrows the visible queue by company / contact / email.
   const audience = useMemo(() => {
@@ -1107,7 +1189,13 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
         <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
-        <span style={{ fontSize: 12.5, color: C.sub }}>Audience: {audienceHint}</span>
+        <span style={{ fontSize: 12.5, color: C.sub }}>Audience</span>
+        <MiniSelect value={aud} onChange={setAud} options={[
+          ["auto", `Suggested: ${audienceHint}`],
+          ...Object.entries(BILLING).map(([k, v]) => [`bill:${k}`, v.label]),
+          ["grp:maritz", "Maritz Portal customers"],
+          ["grp:viper", "Viper Customers"],
+        ]} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
           style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
@@ -1252,8 +1340,22 @@ function PastCharges({ client, state }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onUpdateSettings, officeSiblings = [], onOpen, currentUser }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], onOpen, currentUser }) {
   const set = (patch) => onUpdate(client.id, patch);
+  // Group pricing has ONE active price: choosing "Group" here makes THIS card
+  // the group's billing master (amount auto-set from the office-count tier) and
+  // puts every sibling into covered mode; "Per-office" reactivates everyone.
+  const setPricingMode = (mode) => {
+    if (!client.multiOffice) { set({ priceMode: mode }); return; }
+    if (mode === "group") {
+      const tier = groupTierFor(officeSiblings.length + 1, settings.maritzGroupTiers || GROUP_TIER_DEFAULTS);
+      onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m });
+      officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "group", groupBillingMaster: false }));
+    } else {
+      onUpdate(client.id, { priceMode: "per-office", groupBillingMaster: false });
+      officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "per-office", groupBillingMaster: false }));
+    }
+  };
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
   const [payAmt, setPayAmt] = useState(client.amount);
   const [payDate, setPayDate] = useState(iso());
@@ -1425,24 +1527,33 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           {/* Costing */}
           <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
             <Field label="Amount">
-              <div className="flex items-center" style={{ gap: 6 }}>
-                {/* empty string when 0 so there's no stuck leading "0" while typing */}
-                <input type="number" placeholder={inv.loading ? "…" : "0"} style={{ ...inputStyle, flex: 1, minWidth: 0 }} value={client.amount === 0 ? "" : client.amount}
-                  onChange={(e) => set({ amount: e.target.value === "" ? 0 : Number(e.target.value) })} />
-                {client.multiOffice && (
-                  <select value={client.priceMode} onChange={(e) => set({ priceMode: e.target.value })} title="Billed per office or one group price"
-                    style={{ flexShrink: 0, fontSize: 12, fontWeight: 600, color: C.sub, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 8px", cursor: "pointer", outline: "none" }}>
-                    <option value="per-office">Per-office</option>
-                    <option value="group">Group price</option>
-                  </select>
-                )}
-              </div>
+              {/* empty string when 0 so there's no stuck leading "0" while typing */}
+              <input type="number" placeholder={inv.loading ? "…" : "0"} disabled={coveredByGroup(client)}
+                title={coveredByGroup(client) ? "Billing is handled by the group card" : undefined}
+                style={{ ...inputStyle, opacity: coveredByGroup(client) ? 0.5 : 1 }} value={client.amount === 0 ? "" : client.amount}
+                onChange={(e) => set({ amount: e.target.value === "" ? 0 : Number(e.target.value) })} />
             </Field>
-            <Field label="Currency">
-              <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
-                <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
-              </CompactSelect>
-            </Field>
+            {client.multiOffice ? (
+              <Field label="Pricing">
+                <CompactSelect value={client.priceMode} onChange={(e) => setPricingMode(e.target.value)}>
+                  <option value="per-office">Per-office</option>
+                  <option value="group">Group</option>
+                </CompactSelect>
+              </Field>
+            ) : (
+              <Field label="Currency">
+                <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
+                  <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+                </CompactSelect>
+              </Field>
+            )}
+            {client.multiOffice && (
+              <Field label="Currency">
+                <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
+                  <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+                </CompactSelect>
+              </Field>
+            )}
             <Field label="Cadence">
               <CompactSelect value={client.cadence} onChange={(e) => set({ cadence: e.target.value })}>
                 {Object.entries(CADENCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
@@ -1451,13 +1562,19 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
             <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={client.billingDay} onChange={(e) => set({ billingDay: Number(e.target.value) })} /></Field>
           </div>
 
+          {/* Multi-office group billing: membership, tiers, master/covered states */}
+          {client.multiOffice && (
+            <GroupBilling client={client} settings={settings} officeSiblings={officeSiblings}
+              onUpdate={onUpdate} onUpdateSettings={onUpdateSettings} onOpen={onOpen} onDeleteAny={onDeleteAny} />
+          )}
+
           {/* Viper subscription — user count + tiered pricing, for Viper customers */}
           {(client.segment === "viper-current" || client.viperCustomer) && (
             <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} />
           )}
 
-          {/* Maritz portal pricing — shown for Maritz portal clients */}
-          {(client.segment === "maritz-portal" || client.maritzPortal) && (
+          {/* Maritz portal pricing — single-office clients (groups price via GroupBilling) */}
+          {!client.multiOffice && (client.segment === "maritz-portal" || client.maritzPortal) && (
             <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
           )}
 
@@ -1779,9 +1896,113 @@ function ViperSubscription({ client, settings, onUpdateSettings }) {
     </Section>
   );
 }
+// Multi-office group billing. One office is the group's billing card (master)
+// carrying the single active group price from the office-count tier; every
+// other office is "covered" — no amount due, no reminders, banner to the master.
+function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdateSettings, onOpen, onDeleteAny }) {
+  const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
+  const [edit, setEdit] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null); // office id pending delete
+  const count = officeSiblings.length + 1;
+  const tier = groupTierFor(count, tiers);
+  const isGroup = client.priceMode === "group";
+  const master = isGroup && client.groupBillingMaster;
+  const masterCard = isGroup && !master ? officeSiblings.find((o) => o.groupBillingMaster) : null;
+  const annual = client.cadence === "annual";
+  const suggested = annual ? tier.y : tier.m;
+  const setT = (k, v) => onUpdateSettings({ maritzGroupTiers: { ...tiers, [k]: v } });
+  const removeFromGroup = (o) => onUpdate(o.id, { officeGroup: "", multiOffice: false, priceMode: "per-office", groupBillingMaster: false });
+  const numIn = (val, on) => <input type="number" value={val} onChange={(e) => on(Number(e.target.value))} style={{ ...inputStyle, padding: "6px 8px", fontSize: 13 }} />;
+
+  // Covered member: everything billing points at the group card.
+  if (isGroup && !master) {
+    return (
+      <Section title={`Multi-office · ${client.officeGroup || "group"}`}>
+        <div style={{ background: "#E7EDF8", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#3B5BA5" }}>
+          <span style={{ fontWeight: 700 }}>Billing handled by the group card</span>
+          {masterCard && <> · <button onClick={() => onOpen?.(masterCard.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#3B5BA5", fontWeight: 700, textDecoration: "underline", fontSize: 12.5 }}>{masterCard.company}</button></>}
+          . This office owes nothing on its own.
+        </div>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title={master ? `Group billing card · ${client.officeGroup || "group"}` : `Multi-office · ${client.officeGroup || "group"}`}
+      action={master ? <button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit tiers"}</button> : null}>
+      {master ? (
+        <>
+          <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 12.5, color: C.sub }}>Group price · {tier.label} ({count} office{count === 1 ? "" : "s"})</span>
+            <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(suggested, "USD")}{annual ? "/yr" : "/mo"}</span>
+          </div>
+          {Number(client.amount) !== suggested && (
+            <button onClick={() => onUpdate(client.id, { amount: suggested })}
+              style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", marginBottom: 6 }}>
+              Apply tier price to Amount ({money(suggested, "USD")})
+            </button>
+          )}
+        </>
+      ) : (
+        <div style={{ fontSize: 12.5, color: C.sub, marginBottom: 8 }}>
+          Each office is billed on its own amount. Switch Pricing to <span style={{ fontWeight: 700 }}>Group</span> to make this the group's billing card — {money(suggested, "USD")}{annual ? "/yr" : "/mo"} at {count} office{count === 1 ? "" : "s"} ({tier.label}).
+        </div>
+      )}
+
+      {/* Linked offices — open, remove from group, or delete */}
+      <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, margin: "8px 0 4px" }}>{master ? "Offices covered by this group price" : "Offices in this group"}</div>
+      {officeSiblings.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No other offices linked to “{client.officeGroup}”.</div>}
+      {officeSiblings.map((o) => (
+        <div key={o.id} className="flex items-center" style={{ gap: 8, padding: "6px 8px", background: C.paper, border: `1px solid ${C.lineSoft}`, borderRadius: 8, marginBottom: 4 }}>
+          <button onClick={() => onOpen?.(o.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: C.ink, textAlign: "left", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title="Open this office">
+            {o.company}
+          </button>
+          {o.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
+          {confirmDel === o.id ? (
+            <span className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
+              <span style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>Delete?</span>
+              <button onClick={() => { onDeleteAny?.(o.id); setConfirmDel(null); }} style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: C.red, border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Yes</button>
+              <button onClick={() => setConfirmDel(null)} style={{ fontSize: 11, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>No</button>
+            </span>
+          ) : (
+            <span className="flex items-center" style={{ gap: 4, flexShrink: 0 }}>
+              <button onClick={() => removeFromGroup(o)} title="Remove from group (keeps the client, billed on its own)" aria-label={`Remove ${o.company} from group`}
+                style={{ background: "none", border: "none", cursor: "pointer", color: C.sub, padding: 3, display: "inline-flex", borderRadius: 6 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 12h8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
+              </button>
+              <button onClick={() => setConfirmDel(o.id)} title="Delete this client permanently" aria-label={`Delete ${o.company}`}
+                style={{ background: "none", border: "none", cursor: "pointer", color: C.faint, padding: 3, display: "inline-flex", borderRadius: 6 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = C.redBg; e.currentTarget.style.color = C.red; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.faint; }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+              </button>
+            </span>
+          )}
+        </div>
+      ))}
+
+      {master && edit && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
+          <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginBottom: 8 }}>Global — applies to every office group.</div>
+          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 6, alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: C.sub }} />
+            <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>Monthly ($)</span>
+            <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>Annual ($)</span>
+            {[["Single office", "t1m", "t1y"], ["2–5 offices", "t2m", "t2y"], ["6–10 offices", "t3m", "t3y"], ["11+ offices", "t4m", "t4y"]].map(([lbl, mk, yk]) => (
+              <React.Fragment key={mk}>
+                <span style={{ fontSize: 11.5, color: C.sub }}>{lbl}</span>
+                {numIn(tiers[mk], (v) => setT(mk, v))}
+                {numIn(tiers[yk], (v) => setT(yk, v))}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // Maritz portal pricing. Single-office prices + setup fee are GLOBAL (settings).
-// Multi-office companies get separate Single-office / Group pricing stored per
-// office-group in settings — editing updates every linked office in that group.
 function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSiblings = [] }) {
   const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 140 };
   const [edit, setEdit] = useState(false);
@@ -1791,24 +2012,6 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
   const base = b.cadence === "annual" ? Number(p.annual) || 0 : Number(p.monthly) || 0;
   const total = base + (b.includeSetup ? Number(p.setupFee) || 0 : 0);
   const numIn = (val, on, ph) => <input type="number" value={val} placeholder={ph} onChange={(e) => on(e.target.value === "" ? "" : Number(e.target.value))} style={{ ...inputStyle, padding: "7px 9px" }} />;
-
-  if (client.multiOffice) {
-    const gpAll = settings.maritzGroupPricing || {};
-    const gp = gpAll[client.officeGroup] || { singleOffice: "", group: "" };
-    const setGp = (patch) => onUpdateSettings({ maritzGroupPricing: { ...gpAll, [client.officeGroup]: { ...gp, ...patch } } });
-    return (
-      <Section title="Maritz portal pricing">
-        <div style={{ fontSize: 12, color: C.sub, marginBottom: 8 }}>
-          Multi-office group <span style={{ fontWeight: 600, color: C.action }}>{client.officeGroup || "—"}</span> · {officeSiblings.length + 1} linked office{officeSiblings.length === 0 ? "" : "s"}. Group pricing applies to all of them.
-        </div>
-        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <div><span style={{ fontSize: 11.5, color: C.sub, display: "block", marginBottom: 4 }}>Single office ($/mo)</span>{numIn(gp.singleOffice, (v) => setGp({ singleOffice: v }), "TBD")}</div>
-          <div><span style={{ fontSize: 11.5, color: C.sub, display: "block", marginBottom: 4 }}>Group price ($/mo)</span>{numIn(gp.group, (v) => setGp({ group: v }), "TBD")}</div>
-        </div>
-        <div style={{ fontSize: 11, color: C.faint, marginTop: 8 }}>Pricing to be confirmed — placeholders until set.</div>
-      </Section>
-    );
-  }
 
   return (
     <Section title="Maritz portal pricing" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
@@ -2013,36 +2216,51 @@ function slugify(label, existing) {
   while (BUILTIN_COMMS_KEYS.includes(key) || existing[key]) key = `${base}-${n++}`;
   return key;
 }
-// Strip an HTML email down to readable plain text for the CRM's text templates.
-function htmlToText(html) {
-  return String(html || "")
-    .replace(/<style[\s\S]*?<\/style>/gi, "").replace(/<head[\s\S]*?<\/head>/gi, "")
-    .replace(/<\/(p|div|tr|h[1-6]|li)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&#39;|&apos;/gi, "'").replace(/&quot;/gi, '"')
-    .replace(/\n{3,}/g, "\n\n").split("\n").map((l) => l.trim()).join("\n").trim();
-}
+// What each template token means — {{company}} is the CLIENT's company;
+// {{businessName}} is YOUR business (from Settings). Not the same thing.
+const TOKEN_HINTS = {
+  firstName: "client contact's first name", name: "client contact's full name",
+  company: "the client's company", businessName: "your business name (from Settings)",
+  monthName: "current month, e.g. July 2026", amount: "client's recurring amount",
+  owed: "total currently owed", periods: "billing periods behind",
+  cadence: "monthly / annual", signature: "standard sign-off",
+};
 
-function EmailTemplatesPanel({ settings, onSave }) {
+function EmailTemplatesPanel({ settings, onSave, user }) {
   const custom = settings.emailTemplates || {};
   const [editingKey, setEditingKey] = useState(null); // a real key, or "__new__"
   const [form, setForm] = useState({ label: "", subject: "", body: "" });
-  const [brevo, setBrevo] = useState(null); // null | {loading} | {templates} | {error}
+  const bodyRef = React.useRef(null);
+  const [test, setTest] = useState({ busy: false, msg: "", err: false });
   const allKeys = [...BUILTIN_COMMS_KEYS, ...Object.keys(custom).filter((k) => !BUILTIN_COMMS_KEYS.includes(k))];
 
-  const loadBrevo = async () => {
-    setBrevo({ loading: true });
-    try {
-      const r = await fetch("/api/comms/brevo-templates");
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok || d.error) { setBrevo({ error: d.error || "Couldn't load Brevo templates." }); return; }
-      setBrevo({ templates: d.templates || [] });
-    } catch { setBrevo({ error: "Couldn't reach the server." }); }
+  // Click a placeholder chip → insert at the cursor position in the message body.
+  const insertToken = (t) => {
+    const tok = `{{${t}}}`;
+    const el = bodyRef.current;
+    setForm((f) => {
+      const s = el?.selectionStart ?? f.body.length;
+      const e = el?.selectionEnd ?? s;
+      const body = f.body.slice(0, s) + tok + f.body.slice(e);
+      requestAnimationFrame(() => { if (el) { el.focus(); el.setSelectionRange(s + tok.length, s + tok.length); } });
+      return { ...f, body };
+    });
   };
-  const importOne = (t) => {
-    const label = t.name || "Imported template";
-    const key = slugify(label, custom);
-    onSave({ ...settings, emailTemplates: { ...custom, [key]: { label, subject: t.subject || "", body: htmlToText(t.html) } } });
+
+  // Send the draft to the signed-in staff member, filled with example data.
+  const sendTest = async () => {
+    if (!user?.email) { setTest({ busy: false, msg: "No email on your account.", err: true }); return; }
+    setTest({ busy: true, msg: "", err: false });
+    const tokens = templateTokens(EXAMPLE_CLIENT, settings);
+    try {
+      const r = await fetch("/api/comms/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: user.email, name: user.name || "", subject: `[Test] ${tokenize(form.subject, tokens)}`, body: tokenize(form.body, tokens) }),
+      });
+      const d = await r.json().catch(() => ({}));
+      setTest({ busy: false, msg: r.ok ? `Test sent to ${user.email}` : (d.error || "Send failed."), err: !r.ok });
+    } catch { setTest({ busy: false, msg: "Send failed. Try again.", err: true }); }
   };
 
   const startEdit = (key) => {
@@ -2080,43 +2298,33 @@ function EmailTemplatesPanel({ settings, onSave }) {
       <div>
         <Field label="Name"><input style={inputStyle} value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
         <Field label="Subject"><input style={inputStyle} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} /></Field>
-        <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></Field>
-        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
-          Placeholders, filled in per client when sent: {TEMPLATE_TOKENS.map((t) => `{{${t}}}`).join("  ")}
-          {builtin && editingKey === "reminder" && " — note: the built-in payment reminder normally escalates its wording as an account falls further behind (reminder → second reminder → final notice). Saving here replaces all of that with this one fixed message."}
+        <Field label="Message"><textarea ref={bodyRef} rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} /></Field>
+        {/* Placeholder chips — click to insert at the cursor in the message */}
+        <div style={{ marginBottom: 6 }}>
+          <div style={{ fontSize: 11.5, color: C.sub, fontWeight: 600, marginBottom: 6 }}>Placeholders — click to insert, filled in per client when sent:</div>
+          <div className="flex" style={{ flexWrap: "wrap", gap: 5 }}>
+            {TEMPLATE_TOKENS.map((t) => (
+              <button key={t} onClick={() => insertToken(t)} title={TOKEN_HINTS[t] || t}
+                style={{ fontSize: 11.5, fontFamily: MONO, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                {`{{${t}}}`}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p style={{ fontSize: 11, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
+          {"{{company}}"} is the client's company; {"{{businessName}}"} is your own business name from Settings.
+          {builtin && editingKey === "reminder" && " Note: the built-in payment reminder normally escalates its wording as an account falls further behind (reminder → second reminder → final notice). Saving here replaces all of that with this one fixed message."}
         </p>
         <div className="flex items-center justify-between" style={{ flexWrap: "wrap", gap: 8 }}>
           <div className="flex" style={{ gap: 8 }}>
             <SolidBtn onClick={save}>Save</SolidBtn>
             <GhostBtn onClick={() => setEditingKey(null)}>Cancel</GhostBtn>
+            {builtin && custom[editingKey] && <button onClick={() => resetToDefault(editingKey)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Reset to default wording</button>}
           </div>
-          {builtin && custom[editingKey] && <button onClick={() => resetToDefault(editingKey)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Reset to default wording</button>}
-        </div>
-      </div>
-    );
-  }
-
-  // Brevo import picker
-  if (brevo) {
-    return (
-      <div>
-        <div className="flex items-center justify-between" style={{ marginBottom: 12, gap: 8 }}>
-          <div style={{ fontSize: 13, color: C.sub }}>Import your Brevo transactional templates. HTML is converted to editable text.</div>
-          <GhostBtn onClick={() => setBrevo(null)}>← Back</GhostBtn>
-        </div>
-        {brevo.loading && <div style={{ fontSize: 13, color: C.faint }}>Loading from Brevo…</div>}
-        {brevo.error && <div style={{ fontSize: 13, color: C.red }}>{brevo.error}</div>}
-        {brevo.templates?.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No templates found in this Brevo account.</div>}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {(brevo.templates || []).map((t) => (
-            <div key={t.id} className="flex items-center justify-between" style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", gap: 8 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</div>
-                <div style={{ fontSize: 11, color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.subject || "(no subject)"}{t.active ? "" : " · inactive"}</div>
-              </div>
-              <ImportBtn onImport={() => importOne(t)} />
-            </div>
-          ))}
+          <div className="flex items-center" style={{ gap: 8 }}>
+            {test.msg && <span style={{ fontSize: 12, color: test.err ? C.red : C.green, fontWeight: 600 }}>{test.msg}</span>}
+            <GhostBtn onClick={sendTest}>{test.busy ? "Sending…" : "Send test email"}</GhostBtn>
+          </div>
         </div>
       </div>
     );
@@ -2148,20 +2356,8 @@ function EmailTemplatesPanel({ settings, onSave }) {
           );
         })}
       </div>
-      <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
-        <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
-        <GhostBtn onClick={loadBrevo}>Import from Brevo</GhostBtn>
-      </div>
+      <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
     </div>
-  );
-}
-// Import button that flips to a checkmark once used, so you can see what you've already pulled in.
-function ImportBtn({ onImport }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button onClick={() => { onImport(); setDone(true); }} style={{ fontSize: 12.5, fontWeight: 600, padding: "7px 13px", borderRadius: 8, border: `1px solid ${done ? C.green : C.line}`, background: done ? C.greenBg : C.panel, color: done ? C.green : C.action, cursor: "pointer", flexShrink: 0 }}>
-      {done ? "Imported ✓" : "Import"}
-    </button>
   );
 }
 

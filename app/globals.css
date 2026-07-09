@@ -28,7 +28,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   overflow: hidden;
   flex: 1 1 55%;
   min-width: 0;
-  background: url(/menu-bg.jpg) center / cover no-repeat #eef2f8;
+  background: #ffffff; /* white shows through the 70%-transparent video */
 }
 .login-media-video {
   position: absolute;
@@ -36,9 +36,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
   width: 100%;
   height: 100%;
   object-fit: cover;
+  opacity: 0.3; /* 70% transparent */
 }
 @media (prefers-reduced-motion: reduce) {
   .login-media-video { display: none; }
+  /* static frame, washed to the same 30% strength as the video */
+  .login-media {
+    background:
+      linear-gradient(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.7)),
+      url(/menu-bg.jpg) center / cover no-repeat #ffffff;
+  }
 }
 .login-form-panel { flex: 1 1 45%; }
 

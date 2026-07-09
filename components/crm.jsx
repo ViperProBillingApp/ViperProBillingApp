@@ -569,7 +569,7 @@ export default function CRM({ user }) {
     <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
       <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
-        <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
+        <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
@@ -584,15 +584,6 @@ export default function CRM({ user }) {
 
       <main style={{ flex: 1, minWidth: 0 }}>
       <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
-        {/* Metrics band: lighter than the page so the raised tabs below stand out */}
-        <div style={{ background: "#F8FAFD", border: `1px solid ${C.lineSoft}`, borderRadius: 12, padding: "14px 16px 4px", marginBottom: 14 }}>
-          <header style={{ marginBottom: 12 }}>
-            <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
-            {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
-          </header>
-          <StatStrip clients={active} settings={settings} bounced={bounced.length} />
-        </div>
-
         {saveState === "stale" && (
           <div className="flex items-center justify-between" style={{ gap: 12, background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
             <span style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
@@ -604,19 +595,30 @@ export default function CRM({ user }) {
           </div>
         )}
 
-        {/* Tab row — actions live on the same line, right-aligned */}
-        <nav className="flex items-end" style={{ gap: 3, marginBottom: 16, flexWrap: "wrap", borderBottom: `1px solid ${C.line}` }}>
-          {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
-            <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
-          ))}
-          <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
-            <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
-            <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-            <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
-              {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
-            </span>
+        {/* Metrics box + tab row share one continuous #F8FAFD background (no gap
+            between them); the metrics keep their original boxed padding. */}
+        <div style={{ background: "#F8FAFD", borderBottom: `1px solid ${C.line}`, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
+          <div style={{ padding: "14px 16px 4px" }}>
+            <header style={{ marginBottom: 12 }}>
+              <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
+              {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
+            </header>
+            <StatStrip clients={active} settings={settings} bounced={bounced.length} />
           </div>
-        </nav>
+          {/* Tab row — actions live on the same line, right-aligned */}
+          <nav className="flex items-end" style={{ gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
+            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
+              <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
+            ))}
+            <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
+              <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+              <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
+                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
+              </span>
+            </div>
+          </nav>
+        </div>
 
         {clients.length === 0 ? (
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
@@ -1352,8 +1354,10 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
       onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m });
       officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "group", groupBillingMaster: false }));
     } else {
-      onUpdate(client.id, { priceMode: "per-office", groupBillingMaster: false });
-      officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "per-office", groupBillingMaster: false }));
+      // Per-office dissolves the group: every office reverts to a standalone
+      // single office (no longer grouped), billed on its own.
+      onUpdate(client.id, { priceMode: "per-office", groupBillingMaster: false, multiOffice: false, officeGroup: "" });
+      officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "per-office", groupBillingMaster: false, multiOffice: false, officeGroup: "" }));
     }
   };
   const toggleTag = (t) => set({ tags: client.tags.includes(t) ? client.tags.filter((x) => x !== t) : [...client.tags, t] });
@@ -1899,10 +1903,26 @@ function ViperSubscription({ client, settings, onUpdateSettings }) {
 // Multi-office group billing. One office is the group's billing card (master)
 // carrying the single active group price from the office-count tier; every
 // other office is "covered" — no amount due, no reminders, banner to the master.
+// Icon with a hover bubble (styled tooltip) — used in the group office list.
+function IconTip({ label, onClick, children }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
+      <button onClick={onClick} aria-label={label}
+        style={{ border: "none", cursor: "pointer", color: hov ? C.action : C.sub, padding: 3, display: "inline-flex", borderRadius: 6, background: hov ? C.lineSoft : "transparent" }}>
+        {children}
+      </button>
+      {hov && (
+        <span style={{ position: "absolute", bottom: "calc(100% + 6px)", right: 0, whiteSpace: "nowrap", background: C.ink, color: "#fff", fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, boxShadow: "0 6px 16px rgba(34,48,76,0.28)", zIndex: 5, pointerEvents: "none" }}>
+          {label}
+        </span>
+      )}
+    </span>
+  );
+}
 function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdateSettings, onOpen, onDeleteAny }) {
   const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
   const [edit, setEdit] = useState(false);
-  const [confirmDel, setConfirmDel] = useState(null); // office id pending delete
   const count = officeSiblings.length + 1;
   const tier = groupTierFor(count, tiers);
   const isGroup = client.priceMode === "group";
@@ -1958,26 +1978,9 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
             {o.company}
           </button>
           {o.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
-          {confirmDel === o.id ? (
-            <span className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
-              <span style={{ fontSize: 11, color: C.red, fontWeight: 600 }}>Delete?</span>
-              <button onClick={() => { onDeleteAny?.(o.id); setConfirmDel(null); }} style={{ fontSize: 11, fontWeight: 700, color: "#fff", background: C.red, border: "none", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Yes</button>
-              <button onClick={() => setConfirmDel(null)} style={{ fontSize: 11, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>No</button>
-            </span>
-          ) : (
-            <span className="flex items-center" style={{ gap: 4, flexShrink: 0 }}>
-              <button onClick={() => removeFromGroup(o)} title="Remove from group (keeps the client, billed on its own)" aria-label={`Remove ${o.company} from group`}
-                style={{ background: "none", border: "none", cursor: "pointer", color: C.sub, padding: 3, display: "inline-flex", borderRadius: 6 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 12h8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
-              </button>
-              <button onClick={() => setConfirmDel(o.id)} title="Delete this client permanently" aria-label={`Delete ${o.company}`}
-                style={{ background: "none", border: "none", cursor: "pointer", color: C.faint, padding: 3, display: "inline-flex", borderRadius: 6 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = C.redBg; e.currentTarget.style.color = C.red; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = C.faint; }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
-              </button>
-            </span>
-          )}
+          <IconTip label="Remove from Grouping" onClick={() => removeFromGroup(o)}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 12h8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
+          </IconTip>
         </div>
       ))}
 
@@ -2332,8 +2335,11 @@ function EmailTemplatesPanel({ settings, onSave, user }) {
 
   return (
     <div>
-      <p style={{ fontSize: 13, color: C.sub, marginBottom: 14 }}>These feed the Comms tab and the per-client email button. Edit the built-in ones or add your own.</p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+      <div className="flex items-start justify-between" style={{ gap: 12, marginBottom: 14 }}>
+        <p style={{ fontSize: 13, color: C.sub }}>These feed the Comms tab and the per-client email button. Edit the built-in ones or add your own.</p>
+        <div style={{ flexShrink: 0 }}><SolidBtn onClick={startNew}>+ New email type</SolidBtn></div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {allKeys.map((key) => {
           const builtin = BUILTIN_COMMS_KEYS.includes(key);
           const label = custom[key]?.label || (builtin ? COMMS[key].label : key);
@@ -2356,7 +2362,6 @@ function EmailTemplatesPanel({ settings, onSave, user }) {
           );
         })}
       </div>
-      <SolidBtn onClick={startNew}>+ New email type</SolidBtn>
     </div>
   );
 }

@@ -67,7 +67,9 @@ export default function LoginForm() {
     <div className="flex" style={{ minHeight: "100dvh", background: C.panel, fontFamily: SANS, color: C.ink }}>
       {/* Brand media panel: the animated loop lives full-bleed here instead of
           being veiled behind the form. Hidden on mobile, static under reduced motion. */}
-      <div className="login-media" aria-hidden="true" />
+      <div className="login-media" aria-hidden="true">
+        <video className="login-media-video" autoPlay muted loop playsInline preload="auto" poster="/menu-bg.jpg" src="/login-bg.mp4" />
+      </div>
 
       {/* Form panel */}
       <div className="login-form-panel flex items-center justify-center" style={{ padding: "48px 24px" }}>

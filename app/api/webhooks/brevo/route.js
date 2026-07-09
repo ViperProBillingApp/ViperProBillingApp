@@ -48,6 +48,7 @@ export async function POST(req) {
     ].slice(0, 200);
   }
   if (matched) {
+    state.rev = (state.rev || 0) + 1; // open tabs must reload before saving over this
     await db.query("UPDATE kv SET value = $1 WHERE key = 'state'", [JSON.stringify(state)]);
   }
   return NextResponse.json({ ok: true, event, matched });

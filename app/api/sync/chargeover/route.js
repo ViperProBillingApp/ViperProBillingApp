@@ -13,7 +13,8 @@ async function runSync() {
   const customers = await fetchAllCustomers();
   const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer));
   const { filled, remaining } = await backfillRecurringAmounts(clients);
-  const next = { clients, settings: state.settings || {} };
+  // bump the rev so open tabs holding pre-sync state can't clobber the sync
+  const next = { clients, settings: state.settings || {}, rev: (state.rev || 0) + 1 };
   await db.query(
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify(next)]

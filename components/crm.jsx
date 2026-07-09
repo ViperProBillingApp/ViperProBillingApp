@@ -368,6 +368,10 @@ export default function CRM({ user }) {
 
   const templates = useMemo(() => getTemplates(settings), [settings]);
 
+  // Server-state revision this tab last loaded or saved. Saves send it; the
+  // API rejects a save carrying an older rev so this tab can't wipe newer data.
+  const revRef = React.useRef(0);
+
   // Signed-in user's signature image — shown in the compose editors; the send
   // route appends it server-side to every outgoing email.
   const [signatureImage, setSignatureImage] = useState("");
@@ -406,6 +410,7 @@ export default function CRM({ user }) {
           maritzPricing: { ...s.maritzPricing, ...(d.settings.maritzPricing || {}) },
           maritzGroupPricing: d.settings.maritzGroupPricing || {},
         }));
+        revRef.current = d.rev || 0;
       } catch (e) { /* first run / offline — start empty */ }
       finally { setLoaded(true); }
     })();
@@ -413,20 +418,24 @@ export default function CRM({ user }) {
 
   useEffect(() => {
     if (!loaded) return;
+    if (saveState === "stale") return; // out-of-date tab must never overwrite newer server data
     setSaveState("saving");
     const t = setTimeout(async () => {
       try {
         const r = await fetch("/api/state", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clients, settings }),
+          body: JSON.stringify({ clients, settings, rev: revRef.current }),
         });
         if (r.status === 401) { window.location.href = "/login"; return; }
+        if (r.status === 409) { setSaveState("stale"); return; }
+        const d = await r.json().catch(() => ({}));
+        if (r.ok && d.rev) revRef.current = d.rev;
         setSaveState(r.ok ? "saved" : "error");
       } catch { setSaveState("error"); }
     }, 600);
     return () => clearTimeout(t);
-  }, [clients, settings, loaded]);
+  }, [clients, settings, loaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -452,6 +461,8 @@ export default function CRM({ user }) {
     });
   }, []);
   const update = useCallback((id, patch) => setClients((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))), []);
+  // stable identity so memoized rows don't re-render when unrelated state changes
+  const openCompose = useCallback((id, type) => { setComposeId(id); setComposeType(type || "reminder"); }, []);
   const updateWithLog = useCallback((id, patch, type, text) => {
     setClients((p) => p.map((c) => (c.id === id ? { ...c, ...patch, activity: logActivity(c, type, text) } : c)));
   }, []);
@@ -483,6 +494,7 @@ export default function CRM({ user }) {
       const sr = await fetch("/api/state");
       const sd = await sr.json();
       if (Array.isArray(sd.clients)) setClients(sd.clients.map(normalise));
+      revRef.current = sd.rev || 0; // sync bumped the rev; adopt it so saves keep flowing
       setSync({ busy: false, msg: `ChargeOver synced: ${d.added} added, ${d.updated} updated (${d.customers} customers).` });
     } catch {
       setSync({ busy: false, msg: "Sync failed — try again." });
@@ -495,9 +507,9 @@ export default function CRM({ user }) {
   const compose = clients.find((c) => c.id === composeId);
 
   return (
-    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: SANS, color: C.ink, display: "flex" }}>
-      {/* Left navigation panel */}
-      <aside style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+    <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
+      {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
+      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ padding: "0 6px 20px" }}><Wordmark size={22} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -505,7 +517,7 @@ export default function CRM({ user }) {
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
-        <div style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
+        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
           <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
         </div>
@@ -518,6 +530,17 @@ export default function CRM({ user }) {
           {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
         </header>
 
+        {saveState === "stale" && (
+          <div className="flex items-center justify-between" style={{ gap: 12, background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+            <span style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
+              This tab is out of date. The data changed elsewhere (another tab, a sync, or a bounce webhook), so changes here are not being saved.
+            </span>
+            <button onClick={() => window.location.reload()} style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer" }}>
+              Reload latest
+            </button>
+          </div>
+        )}
+
         <StatStrip clients={active} settings={settings} bounced={bounced.length} />
 
         {/* Tab row — actions live on the same line, right-aligned */}
@@ -528,8 +551,8 @@ export default function CRM({ user }) {
           <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
             <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
             <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-            <span style={{ fontSize: 12, color: saveState === "error" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
-              {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : ""}
+            <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
+              {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
             </span>
           </div>
         </nav>
@@ -538,7 +561,7 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={(id, type) => { setComposeId(id); setComposeType(type || "reminder"); }} onUpdate={update} onUpdateWithLog={updateWithLog} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} />}
@@ -795,6 +818,53 @@ function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
   );
 }
 
+// One client row, memoized: with hundreds of clients, typing in the detail
+// drawer only re-renders the edited client's row instead of the whole table.
+const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
+  const behind = arrearsPeriods(c);
+  const cur = c.currency || settings.currency;
+  return (
+    <div role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+      <div style={{ minWidth: 0 }}>
+        <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
+          <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
+          <span style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={c.company || c.name}>{c.company || c.name}</span>
+          {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
+          {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
+          {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
+        </div>
+        {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+        <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
+          title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
+          {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+        <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
+          title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
+          {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
+        </select>
+      </div>
+      <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
+      <BoolCell value={c.maritzPortal} onChange={(v) => onUpdate(c.id, { maritzPortal: v })} trueLabel="Maritz Portal" falseLabel="Not Maritz" title="Maritz Portal" />
+      <BoolCell value={c.viperCustomer} onChange={(v) => onUpdate(c.id, { viperCustomer: v })} trueLabel="Viper Customer" falseLabel="Not Viper" title="Viper Customer" />
+      <div style={{ textAlign: "right" }}>
+        {behind >= 1
+          ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
+          : needsReminder(c)
+            ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
+            : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
+        {Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
+      </div>
+      <div style={{ textAlign: "right" }}>
+        <EmailIconMenu client={c} templates={templates} onPick={(type) => onEmail(c.id, type)} />
+      </div>
+    </div>
+  );
+});
+
 function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
@@ -841,7 +911,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" title="Searches name, company, email, old emails and ChargeOver ID"
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
       </div>
-      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+      <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
         <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
@@ -852,50 +922,10 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
-        {list.map((c) => {
-          const behind = arrearsPeriods(c);
-          const cur = c.currency || settings.currency;
-          return (
-            <div key={c.id} role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
-              <div style={{ minWidth: 0 }}>
-                <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{c.company || c.name}</span>
-                  {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
-                  {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
-                  {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
-                </div>
-                {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
-              </div>
-              <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
-                <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
-                  title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
-                  {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-              <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
-                <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
-                  title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
-                  {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
-                </select>
-              </div>
-              <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
-              <BoolCell value={c.maritzPortal} onChange={(v) => onUpdate(c.id, { maritzPortal: v })} trueLabel="Maritz Portal" falseLabel="Not Maritz" title="Maritz Portal" />
-              <BoolCell value={c.viperCustomer} onChange={(v) => onUpdate(c.id, { viperCustomer: v })} trueLabel="Viper Customer" falseLabel="Not Viper" title="Viper Customer" />
-              <div style={{ textAlign: "right" }}>
-                {behind >= 1
-                  ? <div style={{ fontFamily: MONO, fontSize: 14, fontWeight: 600, color: C.red }}>{money(totalOwed(c), cur)}<span style={{ fontSize: 11, color: C.faint, fontWeight: 500 }}> · {behind}p</span></div>
-                  : needsReminder(c)
-                    ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.red, fontWeight: 600 }}>balance due</div>
-                    : <div style={{ fontFamily: MONO, fontSize: 13, color: C.green, fontWeight: 600 }}>current</div>}
-                {Number(c.amount) > 0 && <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO }}>{money(c.amount, cur)}/{c.cadence === "annual" ? "yr" : "mo"}</div>}
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <EmailIconMenu client={c} templates={templates} onPick={(type) => onEmail(c.id, type)} />
-              </div>
-            </div>
-          );
-        })}
+        {list.map((c) => (
+          <ClientRow key={c.id} c={c} settings={settings} templates={templates} gridCols={gridCols}
+            onOpen={onOpen} onEmail={onEmail} onUpdate={onUpdate} onUpdateWithLog={onUpdateWithLog} />
+        ))}
         {list.length === 0 && <div style={{ padding: 32, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}
       </div>
     </div>
@@ -1100,7 +1130,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               const behind = arrearsPeriods(c);
               return (
                 <button key={c.id} onClick={() => setSelId(c.id)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, borderLeft: `3px solid ${on ? C.action : "transparent"}`, background: on ? C.lineSoft : "transparent" }}>
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, background: on ? "#E3EAF5" : "transparent", boxShadow: on ? `inset 0 0 0 1px ${C.accent}` : "none" }}>
                   <div className="flex items-center justify-between" style={{ gap: 6 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
                     {sent && <span style={{ color: C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}

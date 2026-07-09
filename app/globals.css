@@ -21,26 +21,82 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .mx-auto { margin-left: auto; margin-right: auto; }
 .w-full { width: 100%; }
 
-/* Login split-screen: media panel is the animated brand loop; honours
-   reduced-motion with the static frame, collapses away on mobile. */
+/* Login split-screen: media panel plays the brand loop as a tiny MP4 over a
+   static poster; reduced-motion sees only the still, mobile drops the panel. */
 .login-media {
+  position: relative;
+  overflow: hidden;
   flex: 1 1 55%;
   min-width: 0;
-  background: url(/login-bg.gif) center / cover no-repeat #eef2f8;
+  background: url(/menu-bg.jpg) center / cover no-repeat #eef2f8;
+}
+.login-media-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-media { background-image: url(/menu-bg.jpg); }
+  .login-media-video { display: none; }
 }
 .login-form-panel { flex: 1 1 45%; }
+
+/* Keyboard-visible focus ring for every plain form control (the app styles
+   inputs inline with outline:none, so this is the accessible replacement),
+   and a subtle physical press on buttons. */
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: #426190 !important;
+  box-shadow: 0 0 0 3px rgba(66, 97, 144, 0.15);
+}
+button:focus-visible {
+  outline: 2px solid #426190;
+  outline-offset: 2px;
+}
+button:not(:disabled):active {
+  transform: translateY(0.5px);
+}
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active { transform: none; }
+}
+
+/* CRM shell on phones: the sidebar becomes a wrapping top bar and the
+   clients table scrolls sideways instead of crushing its 8 columns. */
+@media (max-width: 767px) {
+  .crm-root { flex-direction: column; }
+  .crm-aside {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px !important;
+    padding: 10px 10px 8px !important;
+    border-right: none !important;
+    border-bottom: 1px solid #dfe4ec;
+  }
+  .crm-aside > div:first-child { width: 100%; padding: 0 4px 8px !important; }
+  .crm-aside button { width: auto !important; font-size: 12.5px !important; padding: 8px 9px !important; }
+  .crm-aside-footer {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    border-top: none !important;
+    display: flex;
+    align-items: center;
+    margin-left: auto;
+  }
+  .crm-aside-footer > div { display: none; } /* email label: redundant on a cramped bar */
+  .crm-table { overflow-x: auto !important; }
+  .crm-table > div { min-width: 860px; }
+}
 @media (max-width: 767px) {
   .login-media { display: none; }
   .login-form-panel { flex: 1 1 100%; }
 }
-.login-input:focus {
-  border-color: #426190 !important;
-  box-shadow: 0 0 0 3px rgba(66, 97, 144, 0.15);
-}
-.login-btn:active { transform: translateY(1px); }
 
 @theme inline { --font-heading: var(--font-sans); --font-sans: var(--font-sans); --color-sidebar-ring: var(--sidebar-ring); --color-sidebar-border: var(--sidebar-border); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar: var(--sidebar); --color-chart-5: var(--chart-5); --color-chart-4: var(--chart-4); --color-chart-3: var(--chart-3); --color-chart-2: var(--chart-2); --color-chart-1: var(--chart-1); --color-ring: var(--ring); --color-input: var(--input); --color-border: var(--border); --color-destructive: var(--destructive); --color-accent-foreground: var(--accent-foreground); --color-accent: var(--accent); --color-muted-foreground: var(--muted-foreground); --color-muted: var(--muted); --color-secondary-foreground: var(--secondary-foreground); --color-secondary: var(--secondary); --color-primary-foreground: var(--primary-foreground); --color-primary: var(--primary); --color-popover-foreground: var(--popover-foreground); --color-popover: var(--popover); --color-card-foreground: var(--card-foreground); --color-card: var(--card); --color-foreground: var(--foreground); --color-background: var(--background); --radius-sm: calc(var(--radius) * 0.6); --radius-md: calc(var(--radius) * 0.8); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.4); --radius-2xl: calc(var(--radius) * 1.8); --radius-3xl: calc(var(--radius) * 2.2); --radius-4xl: calc(var(--radius) * 2.6); }
 

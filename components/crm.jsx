@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
 import UsersAdmin from "./users-admin.jsx";
@@ -871,27 +872,36 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
 // Mail icon → small popover menu to pick which template to send before the
 // compose dialog opens, instead of always defaulting to "Payment reminder".
 function EmailIconMenu({ client, templates, onPick }) {
-  const [open, setOpen] = useState(false);
+  // Menu is portalled to <body> with fixed coords: absolute positioning gets
+  // trapped by the archived rows' opacity stacking context and clipped by the
+  // table's overflow, so it wouldn't overlay the rows below.
+  const [menu, setMenu] = useState(null); // null | {top, right}
+  const toggle = (e) => {
+    if (menu) { setMenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+  };
   return (
     <div style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
-      <button onClick={() => setOpen((v) => !v)} title="Email this client" aria-label={`Email ${client.company || client.name}`}
+      <button onClick={toggle} title="Email this client" aria-label={`Email ${client.company || client.name}`}
         style={{ background: "none", border: "none", cursor: "pointer", color: C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
         onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
       </button>
-      {open && (
+      {menu && createPortal(
         <>
-          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-          <div style={{ position: "absolute", right: 0, top: "100%", marginTop: 4, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 41, minWidth: 190, overflow: "hidden" }}>
+          <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
+          <div style={{ position: "fixed", top: menu.top, right: menu.right, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, minWidth: 190, overflow: "hidden" }}>
             {Object.entries(templates).map(([k, v]) => (
-              <button key={k} onClick={() => { onPick(k); setOpen(false); }}
+              <button key={k} onClick={() => { onPick(k); setMenu(null); }}
                 style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", fontSize: 12.5, fontWeight: 500, background: "none", border: "none", cursor: "pointer", color: C.ink }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                 {v.label}
               </button>
             ))}
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );

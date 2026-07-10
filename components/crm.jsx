@@ -375,7 +375,7 @@ export default function CRM({ user }) {
     currency: "USD", businessName: "VIPER", senderName: "Darryl", emailTemplates: {},
     // Global pricing — edited on any Viper/Maritz card, applies to every card of that type.
     viperPricing: { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 },
-    maritzPricing: { monthly: 40, annual: 400, setupFee: 140 },
+    maritzPricing: { monthly: 40, annual: 400, setupFee: 500 },
     maritzGroupTiers: { ...GROUP_TIER_DEFAULTS }, // group pricing by office count — global
   });
   const [loaded, setLoaded] = useState(false);
@@ -413,7 +413,9 @@ export default function CRM({ user }) {
       if (c.id !== id) return c;
       const reminders = { ...(c.reminders || {}) };
       reminders[key] = { ...(reminders[key] || {}), ...patch };
-      const activity = patch.sentAt ? logActivity(c, "email", `${label} marked sent`) : c.activity;
+      const activity = patch.sentAt ? logActivity(c, "email", `${label} marked sent`)
+        : patch.sentAt === null ? logActivity(c, "email", `${label || "Email"} unmarked as sent`)
+        : c.activity;
       return { ...c, reminders, activity };
     }));
   }, []);
@@ -627,7 +629,7 @@ export default function CRM({ user }) {
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -646,7 +648,7 @@ export default function CRM({ user }) {
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
-      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} />}
+      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
@@ -692,7 +694,7 @@ function MenuItem({ onClick, active, icon, children }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog }) {
   const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
@@ -742,20 +744,37 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
         <GhostBtn onClick={() => { markSent("manual"); onDone?.(); }}>Mark sent</GhostBtn>
         {saved.sentAt && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
+        {saved.sentAt && (
+          <button onClick={() => onLogSent(client.id, key, { sentAt: null, via: null }, tpl.label)}
+            style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: C.sub, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
+            Undo
+          </button>
+        )}
         {send.err && <span style={{ fontSize: 12, color: C.red }}>{send.err}</span>}
       </div>
+      {/* Post-send follow-through: set statuses without leaving the queue */}
+      {saved.sentAt && onUpdateWithLog && (
+        <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: C.sub }}>Billing status</span>
+          <MiniSelect value={client.billingStatus} onChange={(v) => onUpdateWithLog(client.id, { billingStatus: v }, "status", `Billing status → ${BILLING[v].label}`)}
+            options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginLeft: 6 }}>Workflow</span>
+          <MiniSelect value={client.stage} onChange={(v) => onUpdateWithLog(client.id, { stage: v }, "stage", `Stage → ${STAGES[v].label}`)}
+            options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+        </div>
+      )}
     </div>
   );
 }
 
 // Per-client email compose dialog (opened from the list's email icon menu,
 // pre-set to whichever template was picked there).
-function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage }) {
+function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
     <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} />
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
     </Modal>
   );
 }
@@ -1134,7 +1153,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 // Queue + editor. WHO to email falls out of the template's natural audience.
 // Sent/unsent state is visible per recipient, and sending auto-advances to
 // the next unsent.
-function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage }) {
+function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage, onUpdateWithLog }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
   const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper
@@ -1157,10 +1176,11 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a));
       if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
     }
+    l = l.filter((c) => !c.reminders?.[key]?.dismissedAt); // "Done" removes the card this period
     const before = l.length;
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
     return [l, before - l.length];
-  }, [clients, type, aud]);
+  }, [clients, type, aud, key]);
 
   // Search narrows the visible queue by company / contact / email.
   const audience = useMemo(() => {
@@ -1240,10 +1260,19 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
                   {client.company || client.name}
                 </button>
                 {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
+                <button onClick={() => {
+                  onLogSent(client.id, key, { dismissedAt: new Date().toISOString() });
+                  onUpdateWithLog?.(client.id, { stage: "contacted-awaiting" }, "stage", "Done in Emails, moved to Contacted · awaiting reply");
+                  advance();
+                }} title="Remove from this list and mark Contacted · awaiting reply"
+                  style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, padding: "7px 14px", borderRadius: 8, border: "none", background: C.green, color: "#fff", cursor: "pointer" }}>
+                  Done ✓
+                </button>
               </div>
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} />
+            {/* After a send, stay on this client (so the status dropdowns are usable); the Done button advances. */}
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={() => setSelId(client.id)} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
           </div>
         </div>
       )}
@@ -2007,7 +2036,7 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
 
 // Maritz portal pricing. Single-office prices + setup fee are GLOBAL (settings).
 function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSiblings = [] }) {
-  const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 140 };
+  const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 500 };
   const [edit, setEdit] = useState(false);
   const b = client.maritzBilling || { cadence: "monthly", includeSetup: false };
   const setB = (patch) => onUpdate({ maritzBilling: { ...b, ...patch } });

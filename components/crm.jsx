@@ -2103,6 +2103,24 @@ function IconTip({ label, onClick, children }) {
 function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdateSettings, onOpen, onDeleteAny, onManage }) {
   const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
   const [edit, setEdit] = useState(false);
+  const [copied, setCopied] = useState(false);
+  // Companies in the group with each office's most recent invoice (recorded
+  // payment, falling back to lastPaid + amount). Tab-separated — pastes into sheets.
+  const copyList = () => {
+    const lastInv = (o) => {
+      const pays = [...(o.payments || [])].filter((p) => parseDate(p.date)).sort((a, b) => parseDate(b.date) - parseDate(a.date));
+      if (pays[0]) return { date: fmtDate(pays[0].date), amount: money(pays[0].amount, o.currency || "USD") };
+      if (o.lastPaid) return { date: fmtDate(o.lastPaid), amount: o.amount ? money(o.amount, o.currency || "USD") : "—" };
+      return { date: "—", amount: "—" };
+    };
+    const all = [client, ...officeSiblings];
+    const lines = [
+      `${client.officeGroup || client.company} — ${all.length} office${all.length === 1 ? "" : "s"}`,
+      "Company\tLast invoice\tAmount",
+      ...all.map((o) => { const li = lastInv(o); return `${o.company || o.name}\t${li.date}\t${li.amount}`; }),
+    ];
+    navigator.clipboard?.writeText(lines.join("\n")).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); });
+  };
   const count = officeSiblings.length + 1;
   const tier = groupTierFor(count, tiers);
   const isGroup = client.priceMode === "group";
@@ -2129,7 +2147,10 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
 
   return (
     <Section title={master ? `Group billing card · ${client.officeGroup || "group"}` : `Multi-office · ${client.officeGroup || "group"}`}
-      action={master ? <button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit tiers"}</button> : null}>
+      action={<span className="flex items-center" style={{ gap: 12 }}>
+        <button onClick={copyList} title="Copy the group's companies with last invoice date and amount" style={{ fontSize: 11.5, fontWeight: 600, color: copied ? C.green : C.action, background: "none", border: "none", cursor: "pointer" }}>{copied ? "Copied ✓" : "Copy list"}</button>
+        {master && <button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit tiers"}</button>}
+      </span>}>
       {master ? (
         <>
           <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 4 }}>

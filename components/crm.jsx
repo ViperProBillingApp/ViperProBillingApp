@@ -1966,22 +1966,26 @@ const USERLIST_VIEW = [7, 0, 1, 2, 3, 4, 5, 6];
 const LAST_LOGIN_IDX = 7;
 // Sort key for "most recent login first" — blanks / "-" sink to the bottom.
 function lastLoginTime(u) { const d = parseDate(u && u[LAST_LOGIN_IDX]); return d ? d.getTime() : -Infinity; }
+// "Administrator, Site" is the portal's built-in system account — never billable,
+// never counted, never included in copied lists.
+function isSiteAdmin(u) { return ((u && u[0]) || "").toLowerCase().replace(/[^a-z]/g, "") === "administratorsite"; }
 // A user counts as "current" if not terminated and not expired.
 function isCurrentUser(u) {
-  // "Administrator, Site" is the portal's built-in system account — never billable
-  if ((u[0] || "").toLowerCase().replace(/[^a-z]/g, "") === "administratorsite") return false;
+  if (isSiteAdmin(u)) return false;
   const t = u[5], e = u[6]; const blank = (v) => !v || v === "-"; return blank(t) && blank(e);
 }
 // Plain-text block of a user list for pasting into an email to the client.
 function userListToText(client, list) {
   const lines = [`${client.company || client.name} — portal users (collected ${fmtDate(list.collectedAt)})`, ""];
+  let count = 0;
   for (const u of list.users || []) {
+    if (isSiteAdmin(u)) continue;
     const name = u[0] || "";
     const title = u[1] ? ` — ${u[1]}` : "";
     const last = u[7] && u[7] !== "-" ? ` (last login ${u[7]})` : "";
-    if (name) lines.push(`• ${name}${title}${last}`);
+    if (name) { lines.push(`• ${name}${title}${last}`); count++; }
   }
-  lines.push("", `${(list.users || []).length} users`);
+  lines.push("", `${count} users`);
   return lines.join("\n");
 }
 // One captured user list: dated header, copy-for-email, archive/delete, expandable table.
@@ -2004,7 +2008,7 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
         <button onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.ink }}>
           {open ? "▾" : "▸"} Collected {fmtDate(list.collectedAt)}
         </button>
-        <span style={{ fontSize: 11.5, color: C.faint }}>{rows.length} users{list.archived ? " · archived" : ""}{draft ? " · editing" : ""}</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>{rows.filter((u) => !isSiteAdmin(u)).length} users{list.archived ? " · archived" : ""}{draft ? " · editing" : ""}</span>
         <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
           {draft ? (
             <>

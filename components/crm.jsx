@@ -1243,6 +1243,17 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
 // Queue + editor. WHO to email falls out of the template's natural audience.
 // Sent/unsent state is visible per recipient, and sending auto-advances to
 // the next unsent.
+// Latest email sent to this client THIS PERIOD, any template type — the queue's
+// "already emailed" signal (per-type keys alone hide sends made with other templates).
+function periodSent(c) {
+  const suffix = `:${periodKey()}`;
+  let best = null;
+  for (const [k, v] of Object.entries(c.reminders || {})) {
+    if (!v?.sentAt || !k.endsWith(suffix)) continue;
+    if (!best || v.sentAt > best.sentAt) best = v;
+  }
+  return best;
+}
 function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage, onUpdateWithLog }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
@@ -1284,13 +1295,12 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a));
       if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
     }
-    // "Done" without sending removes the card; SENT cards stay listed (marked
-    // "Email sent") and sort below the ones still waiting.
-    l = l.filter((c) => { const r = c.reminders?.[key]; return !(r?.dismissedAt && !r?.sentAt); });
+    // Emailed-this-period cards (any template) stay listed marked "Email sent";
+    // "Done" without sending removes the card for the selected email type.
+    l = l.filter((c) => periodSent(c) || !c.reminders?.[key]?.dismissedAt);
     const before = l.length;
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
-    const isSent = (c) => c.reminders?.[key]?.sentAt;
-    l = [...l.filter((c) => !isSent(c)), ...l.filter(isSent)];
+    l = [...l.filter((c) => !periodSent(c)), ...l.filter((c) => periodSent(c))];
     return [l, before - l.length];
   }, [clients, type, aud, key]);
 
@@ -1302,7 +1312,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   }, [fullAudience, q]);
 
   useEffect(() => { setSelId(null); }, [type]);
-  const sentOf = (c) => c.reminders?.[key]?.sentAt;
+  const sentOf = (c) => periodSent(c)?.sentAt;
   const client = audience.find((c) => c.id === selId) || audience.find((c) => !sentOf(c)) || audience[0];
   const sentCount = fullAudience.filter(sentOf).length;
   const advance = () => {

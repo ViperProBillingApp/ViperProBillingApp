@@ -1284,9 +1284,13 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a));
       if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
     }
-    l = l.filter((c) => !c.reminders?.[key]?.dismissedAt); // "Done" removes the card this period
+    // "Done" without sending removes the card; SENT cards stay listed (marked
+    // "Email sent") and sort below the ones still waiting.
+    l = l.filter((c) => { const r = c.reminders?.[key]; return !(r?.dismissedAt && !r?.sentAt); });
     const before = l.length;
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
+    const isSent = (c) => c.reminders?.[key]?.sentAt;
+    l = [...l.filter((c) => !isSent(c)), ...l.filter(isSent)];
     return [l, before - l.length];
   }, [clients, type, aud, key]);
 
@@ -1386,13 +1390,13 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               const behind = arrearsPeriods(c);
               return (
                 <button key={c.id} onClick={() => setSelId(c.id)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, background: on ? "#E3EAF5" : "transparent", boxShadow: on ? `inset 0 0 0 1px ${C.accent}` : "none" }}>
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, background: on ? "#E3EAF5" : "transparent", boxShadow: on ? `inset 0 0 0 1px ${C.accent}` : "none", opacity: sent ? 0.75 : 1 }}>
                   <div className="flex items-center justify-between" style={{ gap: 6 }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
                     {sent && <span style={{ color: C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: C.sub, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {behind >= 1 ? `${money(totalOwed(c), c.currency || settings.currency)} · ${behind}p behind` : BILLING[c.billingStatus].label}
+                  <div style={{ fontSize: 11, color: sent ? C.green : C.sub, fontWeight: sent ? 600 : 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {sent ? `Email sent · ${fmtDate(sent)}` : behind >= 1 ? `${money(totalOwed(c), c.currency || settings.currency)} · ${behind}p behind` : BILLING[c.billingStatus].label}
                   </div>
                 </button>
               );

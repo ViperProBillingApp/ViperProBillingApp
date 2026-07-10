@@ -7,20 +7,26 @@ import { sendClientEmail } from "../../../../lib/email.js";
 export async function POST(req) {
   const me = await getSessionUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  const { to, name, subject, body, recipients } = await req.json().catch(() => ({}));
+  const { to, name, subject, body, recipients, cc, from } = await req.json().catch(() => ({}));
   const okEmail = (e) => /^\S+@\S+\.\S+$/.test(String(e || ""));
+  const normList = (arr, cap) => arr
+    .map((r) => (typeof r === "string" ? { email: r } : r))
+    .filter((r) => okEmail(r?.email)).slice(0, cap)
+    .map((r) => ({ email: String(r.email), name: String(r.name || "") }));
   // Group-office sends pass a recipients array (all contacts across the group's offices)
-  const list = Array.isArray(recipients)
-    ? recipients.filter((r) => okEmail(r?.email)).slice(0, 100).map((r) => ({ email: String(r.email), name: String(r.name || "") }))
-    : null;
+  const list = Array.isArray(recipients) ? normList(recipients, 100) : null;
+  const ccList = Array.isArray(cc) ? normList(cc, 20) : null;
   if (list ? list.length === 0 : !okEmail(to)) {
     return NextResponse.json({ error: "No valid recipient email." }, { status: 400 });
+  }
+  if (from !== undefined && !okEmail(from)) {
+    return NextResponse.json({ error: "From must be a valid email address." }, { status: 400 });
   }
   if (!String(subject || "").trim() || !String(body || "").trim()) {
     return NextResponse.json({ error: "Subject and message are required." }, { status: 400 });
   }
   // sender's uploaded signature image rides along on every outgoing template
-  const ok = await sendClientEmail(list || String(to), String(name || ""), String(subject), String(body), me.signature_image || "");
+  const ok = await sendClientEmail(list || String(to), String(name || ""), String(subject), String(body), me.signature_image || "", { cc: ccList || undefined, from: from || undefined });
   if (!ok) return NextResponse.json({ error: "Send failed — Brevo not configured or rejected the message." }, { status: 502 });
   return NextResponse.json({ ok: true });
 }

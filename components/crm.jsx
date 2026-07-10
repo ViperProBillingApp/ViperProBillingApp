@@ -719,11 +719,32 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
     });
     return list.length > 1 ? list : null;
   }, [client, officeSiblings]);
+  // Editable address fields. To pre-fills with the client (or the whole group's
+  // contacts); CC offers the company's other contacts or free-typed addresses.
+  const [toStr, setToStr] = useState(() => (recipients ? recipients.map((r) => r.email).join(", ") : client.email || ""));
+  const [ccStr, setCcStr] = useState("");
+  const [fromStr, setFromStr] = useState(FROM_EMAIL);
+  const parseEmails = (s) => [...new Set(String(s).split(/[,;\n ]+/).map((x) => x.trim().toLowerCase()).filter((x) => /^\S+@\S+\.\S+$/.test(x)))];
+  const contactOptions = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    [client, ...officeSiblings].forEach((o) => {
+      [{ name: o.name, email: o.email }, ...(o.secondaryContacts || [])].forEach((p) => {
+        const e = (p.email || "").trim().toLowerCase();
+        if (!e || !/^\S+@\S+\.\S+$/.test(e) || seen.has(e)) return;
+        seen.add(e);
+        out.push({ name: (p.name || "").trim(), email: e });
+      });
+    });
+    return out;
+  }, [client, officeSiblings]);
+  const inUse = new Set([...parseEmails(toStr), ...parseEmails(ccStr)]);
+  const ccOptions = contactOptions.filter((c) => !inUse.has(c.email));
   const subject = saved.subject ?? tpl.subject(client, settings);
   const body = saved.body ?? tpl.body(client, settings);
   const [copied, setCopied] = useState(false);
   const [send, setSend] = useState({ busy: false, err: "" });
-  const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
+  const copy = () => { navigator.clipboard?.writeText(`From: ${fromStr}\nTo: ${toStr}${ccStr.trim() ? `\nCc: ${ccStr}` : ""}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
   const markSent = (via) => {
     const now = new Date().toISOString();
     // Sent = contacted: leave the email queue and start the 10-day reply clock.
@@ -733,29 +754,52 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
     }
   };
   const sendNow = async () => {
+    const toList = parseEmails(toStr);
+    const ccList = parseEmails(ccStr);
+    if (!toList.length) { setSend({ busy: false, err: "No valid recipient email in To." }); return; }
     setSend({ busy: true, err: "" });
     try {
       const r = await fetch("/api/comms/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(recipients ? { recipients, subject, body } : { to: client.email, name: client.name, subject, body }),
+        body: JSON.stringify({
+          recipients: toList.map((e) => ({ email: e })),
+          ...(ccList.length ? { cc: ccList.map((e) => ({ email: e })) } : {}),
+          ...(fromStr.trim().toLowerCase() !== FROM_EMAIL.toLowerCase() ? { from: fromStr.trim() } : {}),
+          subject, body,
+        }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setSend({ busy: false, err: d.error || "Send failed." }); return; }
       markSent("brevo");
       setSend({ busy: false, err: "" });
-      onSent?.(`Sent to ${client.company || client.name}`);
+      onSent?.(`Sent to ${client.company || client.name}${toList.length + ccList.length > 1 ? ` (${toList.length + ccList.length} recipients)` : ""}`);
       onDone?.();
     } catch { setSend({ busy: false, err: "Send failed — try again." }); }
   };
   return (
     <div>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="To"><div title={recipients ? recipients.map((r) => r.email).join(", ") : undefined} style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {recipients ? `${recipients.length} contacts across ${officeSiblings.length + 1} offices` : client.email || "No email on file — add one first"}
-        </div></Field>
-        <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{FROM_EMAIL}</div></Field>
+        <Field label={recipients ? `To · all contacts across ${officeSiblings.length + 1} offices` : "To"}>
+          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={toStr} onChange={(e) => setToStr(e.target.value)} placeholder="email, email…" />
+        </Field>
+        <Field label="From">
+          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={fromStr} onChange={(e) => setFromStr(e.target.value)} title="Must be a sender address verified in Brevo" />
+        </Field>
       </div>
+      <Field label="CC">
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13, flex: 1 }} value={ccStr} onChange={(e) => setCcStr(e.target.value)} placeholder="Add emails, comma separated" />
+          {ccOptions.length > 0 && (
+            <select value="" title="Add one of this company's contacts to CC"
+              onChange={(e) => { const v = e.target.value; if (v) setCcStr((s) => (s.trim() ? s.trim().replace(/,$/, "") + ", " : "") + v); }}
+              style={{ fontSize: 12.5, padding: "9px 8px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.action, fontWeight: 600, cursor: "pointer", maxWidth: 200 }}>
+              <option value="">+ contact…</option>
+              {ccOptions.map((c) => <option key={c.email} value={c.email}>{c.name ? `${c.name} — ${c.email}` : c.email}</option>)}
+            </select>
+          )}
+        </div>
+      </Field>
       <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
       <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       {/* Sender's signature — appended automatically by the send route */}
@@ -768,7 +812,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 12 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
       )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-        <button onClick={sendNow} disabled={(!client.email && !recipients) || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: (!client.email && !recipients) || send.busy ? C.grey : C.action, color: "#fff", cursor: (!client.email && !recipients) || send.busy ? "default" : "pointer" }}>
+        <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer" }}>
           {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
         </button>
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>

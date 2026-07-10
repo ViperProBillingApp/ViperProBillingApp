@@ -317,6 +317,7 @@ function normalise(r) {
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
     officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
     emailPrimaryOnly: !!r.emailPrimaryOnly, // group master: email only this card's contact, not every office's
+    viperCadence: r.viperCadence === "annual" ? "annual" : "monthly", // Viper subscription: monthly vs annual-in-advance pricing
     priceMode: r.priceMode === "group" ? "group" : "per-office", // per-office billing vs one group price
     groupBillingMaster: !!r.groupBillingMaster, // the ONE office that carries the group price
     // Maritz portal per-company billing choices (prices themselves are global in settings)
@@ -376,7 +377,7 @@ export default function CRM({ user }) {
   const [settings, setSettings] = useState({
     currency: "USD", businessName: "VIPER", senderName: "Darryl", emailTemplates: {},
     // Global pricing — edited on any Viper/Maritz card, applies to every card of that type.
-    viperPricing: { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 },
+    viperPricing: { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10, baseY: 3000, tier2Y: 900, tier3Y: 800 },
     maritzPricing: { monthly: 40, annual: 400, setupFee: 500 },
     maritzGroupTiers: { ...GROUP_TIER_DEFAULTS }, // group pricing by office count — global
   });
@@ -1444,7 +1445,7 @@ function PastCharges({ client, state }) {
     if (client.coBalance != null) lines.push(`Live balance: ${money(client.coBalance, client.currency)} (as of last sync)`);
     lines.push("");
     for (const inv of state.invoices) {
-      const status = inv.paid ? "paid" : inv.overdue ? "overdue" : "open";
+      const status = (inv.status || (inv.paid ? "Paid" : inv.overdue ? "Overdue" : "Open")).toLowerCase();
       lines.push(`${fmtDate(inv.date)} · #${inv.number} · ${status} · ${inv.currency}${(inv.total || 0).toLocaleString()}`);
     }
     return lines.join("\n");
@@ -1463,7 +1464,11 @@ function PastCharges({ client, state }) {
         <div key={inv.id} className="flex items-center justify-between" style={{ fontSize: 12.5, padding: "6px 0", borderBottom: `1px solid ${C.lineSoft}`, gap: 8 }}>
           <span style={{ fontFamily: MONO, color: C.sub }}>{fmtDate(inv.date)} · #{inv.number}</span>
           <span className="flex items-center" style={{ gap: 8 }}>
-            <MiniPill fg={inv.paid ? C.green : inv.overdue ? C.red : C.amber} bg={inv.paid ? C.greenBg : inv.overdue ? C.redBg : C.amberBg}>{inv.paid ? "paid" : inv.overdue ? "overdue" : "open"}</MiniPill>
+            <MiniPill
+              fg={inv.voided ? C.faint : inv.paid ? C.green : inv.overdue ? C.red : C.amber}
+              bg={inv.voided ? C.greyBg : inv.paid ? C.greenBg : inv.overdue ? C.redBg : C.amberBg}>
+              {(inv.status || (inv.paid ? "Paid" : inv.overdue ? "Overdue" : "Open")).toLowerCase()}
+            </MiniPill>
             <span style={{ fontFamily: MONO, fontWeight: 600 }}>{inv.currency}{(inv.total || 0).toLocaleString()}</span>
           </span>
         </div>
@@ -1541,7 +1546,8 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   // Prefill Amount from the most recent invoice when no amount is set — stays editable.
   useEffect(() => {
     if (client.amount || !inv.invoices.length) return;
-    const latest = [...inv.invoices].sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    // voided / written-off invoices never drive the recurring amount
+    const latest = [...inv.invoices].filter((i) => !i.voided).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
     if (latest && Number(latest.total) > 0) onUpdate(client.id, { amount: Number(latest.total) });
   }, [inv.invoices, client.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2051,39 +2057,67 @@ function viperMonthly(n, p) {
   if (n < p.tier3Min) return n * (Number(p.tier2) || 0);
   return n * (Number(p.tier3) || 0);
 }
-// Viper subscription: current user count + tiered price. Pricing is GLOBAL (settings) — editing here changes every Viper card.
+// Same tiers, annual-in-advance rates.
+function viperAnnual(n, p) {
+  if (n <= 0) return 0;
+  if (n < p.tier2Min) return Number(p.baseY) || 0;
+  if (n < p.tier3Min) return n * (Number(p.tier2Y) || 0);
+  return n * (Number(p.tier3Y) || 0);
+}
+// Viper subscription: current user count + tiered price, monthly or annual-in-
+// advance per client. Pricing is GLOBAL (settings) — editing changes every Viper card.
 function ViperSubscription({ client, settings, onUpdateSettings, onUpdate }) {
-  const p = settings.viperPricing || { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 };
+  const p = settings.viperPricing || { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10, baseY: 3000, tier2Y: 900, tier3Y: 800 };
   const [edit, setEdit] = useState(false);
   const n = currentUserCount(client);
-  const total = viperMonthly(n, p);
-  const tier = n <= 0 ? "—" : n < p.tier2Min ? `Base (1–${p.tier2Min - 1} users)` : n < p.tier3Min ? `${p.tier2Min}–${p.tier3Min - 1} users · ${money(p.tier2, "USD")}/user` : `${p.tier3Min}+ users · ${money(p.tier3, "USD")}/user`;
+  const annual = client.viperCadence === "annual";
+  const total = annual ? viperAnnual(n, p) : viperMonthly(n, p);
+  const per = annual ? { flat: p.baseY, t2: p.tier2Y, t3: p.tier3Y, unit: "/user/yr" } : { flat: p.base, t2: p.tier2, t3: p.tier3, unit: "/user/mo" };
+  const tier = n <= 0 ? "—"
+    : n < p.tier2Min ? `Base (1–${p.tier2Min - 1} users, flat)`
+    : n < p.tier3Min ? `${p.tier2Min}–${p.tier3Min - 1} users · ${money(per.t2, "USD")}${per.unit}`
+    : `${p.tier3Min}+ users · ${money(per.t3, "USD")}${per.unit}`;
   const setP = (patch) => onUpdateSettings({ viperPricing: { ...p, ...patch } });
   const numIn = (val, on) => <input type="number" value={val} onChange={(e) => on(Number(e.target.value))} style={{ ...inputStyle, padding: "7px 9px" }} />;
   return (
     <Section title="Viper subscription" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
+      {/* Monthly / Annual toggle — per client */}
+      <div className="flex items-center" style={{ gap: 4, marginBottom: 10 }}>
+        {[["monthly", "Monthly"], ["annual", "Annual"]].map(([k, label]) => {
+          const on = (client.viperCadence || "monthly") === k;
+          return (
+            <button key={k} onClick={() => onUpdate?.({ viperCadence: k })}
+              style={{ fontSize: 12, fontWeight: 600, padding: "5px 14px", borderRadius: 20, cursor: "pointer", border: `1px solid ${on ? C.action : C.line}`, background: on ? C.action : C.panel, color: on ? "#fff" : C.sub }}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
       <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 6 }}>
         <span style={{ fontSize: 12.5, color: C.sub }}>Current users</span>
         <span style={{ fontSize: 15, fontWeight: 700, fontFamily: MONO }}>{n}</span>
       </div>
       <div className="flex items-baseline justify-between" style={{ gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 12.5, color: C.sub }}>Monthly subscription</span>
-        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}/mo</span>
+        <span style={{ fontSize: 12.5, color: C.sub }}>{annual ? "Annual subscription · paid in advance" : "Monthly subscription"}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}{annual ? "/yr" : "/mo"}</span>
       </div>
       <div style={{ fontSize: 11.5, color: C.faint }}>{tier}</div>
-      {onUpdate && total > 0 && Number(client.amount) !== total && (
-        <button onClick={() => onUpdate({ amount: total })}
-          style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", marginTop: 8 }}>
-          Update Amount to {money(total, "USD")} (currently {money(client.amount, "USD")})
-        </button>
-      )}
       {edit && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginBottom: 8 }}>Global — applies to every Viper customer.</div>
-          <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>Base 1–{p.tier2Min - 1} ($/mo)</span>{numIn(p.base, (v) => setP({ base: v }))}</div>
-            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>{p.tier2Min}–{p.tier3Min - 1} ($/user)</span>{numIn(p.tier2, (v) => setP({ tier2: v }))}</div>
-            <div><span style={{ fontSize: 11, color: C.sub, display: "block", marginBottom: 3 }}>{p.tier3Min}+ ($/user)</span>{numIn(p.tier3, (v) => setP({ tier3: v }))}</div>
+          <div className="grid" style={{ gridTemplateColumns: "auto 1fr 1fr", gap: "6px 8px", alignItems: "center" }}>
+            <span />
+            <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>Monthly ($)</span>
+            <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>Annual ($)</span>
+            <span style={{ fontSize: 11.5, color: C.sub }}>1–{p.tier2Min - 1} users (flat)</span>
+            {numIn(p.base, (v) => setP({ base: v }))}
+            {numIn(p.baseY, (v) => setP({ baseY: v }))}
+            <span style={{ fontSize: 11.5, color: C.sub }}>{p.tier2Min}–{p.tier3Min - 1} users (per user)</span>
+            {numIn(p.tier2, (v) => setP({ tier2: v }))}
+            {numIn(p.tier2Y, (v) => setP({ tier2Y: v }))}
+            <span style={{ fontSize: 11.5, color: C.sub }}>{p.tier3Min}+ users (per user)</span>
+            {numIn(p.tier3, (v) => setP({ tier3: v }))}
+            {numIn(p.tier3Y, (v) => setP({ tier3Y: v }))}
           </div>
         </div>
       )}

@@ -316,6 +316,7 @@ function normalise(r) {
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
     officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
+    emailPrimaryOnly: !!r.emailPrimaryOnly, // group master: email only this card's contact, not every office's
     priceMode: r.priceMode === "group" ? "group" : "per-office", // per-office billing vs one group price
     groupBillingMaster: !!r.groupBillingMaster, // the ONE office that carries the group price
     // Maritz portal per-company billing choices (prices themselves are global in settings)
@@ -650,7 +651,8 @@ export default function CRM({ user }) {
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId} />}
-      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
+      {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
+        officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
@@ -696,10 +698,26 @@ function MenuItem({ onClick, active, icon, children }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
+  // Group master: fan out to every contact (main + additional) across all
+  // offices — unless the card's "primary contact only" box is ticked.
+  const recipients = useMemo(() => {
+    if (!(client.multiOffice && client.priceMode === "group" && client.groupBillingMaster) || client.emailPrimaryOnly) return null;
+    const seen = new Set();
+    const list = [];
+    [client, ...officeSiblings].forEach((o) => {
+      [{ name: o.name, email: o.email }, ...(o.secondaryContacts || [])].forEach((p) => {
+        const e = (p.email || "").trim().toLowerCase();
+        if (!e || !/^\S+@\S+\.\S+$/.test(e) || seen.has(e)) return;
+        seen.add(e);
+        list.push({ email: e, name: p.name || "" });
+      });
+    });
+    return list.length > 1 ? list : null;
+  }, [client, officeSiblings]);
   const subject = saved.subject ?? tpl.subject(client, settings);
   const body = saved.body ?? tpl.body(client, settings);
   const [copied, setCopied] = useState(false);
@@ -719,7 +737,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
       const r = await fetch("/api/comms/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: client.email, name: client.name, subject, body }),
+        body: JSON.stringify(recipients ? { recipients, subject, body } : { to: client.email, name: client.name, subject, body }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setSend({ busy: false, err: d.error || "Send failed." }); return; }
@@ -732,7 +750,9 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
   return (
     <div>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label="To"><div style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{client.email || "No email on file — add one first"}</div></Field>
+        <Field label="To"><div title={recipients ? recipients.map((r) => r.email).join(", ") : undefined} style={{ fontFamily: MONO, fontSize: 13, color: client.email ? C.ink : C.red, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {recipients ? `${recipients.length} contacts across ${officeSiblings.length + 1} offices` : client.email || "No email on file — add one first"}
+        </div></Field>
         <Field label="From"><div style={{ fontFamily: MONO, fontSize: 13, color: C.sub, padding: "9px 11px", background: C.lineSoft, borderRadius: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{FROM_EMAIL}</div></Field>
       </div>
       <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
@@ -747,7 +767,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 12 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
       )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-        <button onClick={sendNow} disabled={!client.email || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !client.email || send.busy ? C.grey : C.action, color: "#fff", cursor: !client.email || send.busy ? "default" : "pointer" }}>
+        <button onClick={sendNow} disabled={(!client.email && !recipients) || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: (!client.email && !recipients) || send.busy ? C.grey : C.action, color: "#fff", cursor: (!client.email && !recipients) || send.busy ? "default" : "pointer" }}>
           {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
         </button>
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
@@ -778,12 +798,12 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 
 // Per-client email compose dialog (opened from the list's email icon menu,
 // pre-set to whichever template was picked there).
-function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog }) {
+function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
     <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} />
     </Modal>
   );
 }
@@ -982,10 +1002,14 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
   const [owed, setOwed] = useState("all");
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
   const activeCount = [seg, bill, stage, co, mp, vc, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
   const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setMp("all"); setVc("all"); setOwed("all"); setQ(""); };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
+    // Offices covered by a group card stay off the main list — the group card
+    // represents them. The Multi-offices toggle flips to showing just them.
+    l = l.filter((c) => (showOffices ? c.multiOffice && !c.groupBillingMaster : !coveredByGroup(c)));
     if (seg !== "all") l = l.filter((c) => c.segment === seg);
     if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
     if (stage !== "all") l = l.filter((c) => c.stage === stage);
@@ -1001,7 +1025,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived]);
+  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived, showOffices]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
   const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 1fr 0.9fr 40px";
   return (
@@ -1014,6 +1038,9 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
+        </label>
+        <label className="flex items-center" title="Show the individual offices that sit inside multi-office groups" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer" }}>
+          <input type="checkbox" checked={showOffices} onChange={(e) => setShowOffices(e.target.checked)} /> Multi-offices
         </label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" title="Searches name, company, email, old emails and ChargeOver ID"
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
@@ -1343,7 +1370,8 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
             {/* Sending auto-dismisses the card, so move straight to the next recipient. */}
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog}
+              officeSiblings={client.officeGroup ? clients.filter((o) => o.id !== client.id && o.officeGroup === client.officeGroup) : []} />
           </div>
         </div>
       )}
@@ -2101,6 +2129,11 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
               Apply tier price to Amount ({money(suggested, "USD")})
             </button>
           )}
+          <label className="flex items-center" style={{ gap: 7, fontSize: 12.5, color: C.ink, cursor: "pointer", margin: "4px 0 6px", width: "fit-content" }}
+            title="Ticked: emails go only to this card's contact. Unticked: emails go to every contact of every office in the group.">
+            <input type="checkbox" checked={!!client.emailPrimaryOnly} onChange={(e) => onUpdate(client.id, { emailPrimaryOnly: e.target.checked })} />
+            Email primary contact only
+          </label>
         </>
       ) : (
         <div style={{ fontSize: 12.5, color: C.sub, marginBottom: 8 }}>

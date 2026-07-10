@@ -7,15 +7,20 @@ import { sendClientEmail } from "../../../../lib/email.js";
 export async function POST(req) {
   const me = await getSessionUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  const { to, name, subject, body } = await req.json().catch(() => ({}));
-  if (!/^\S+@\S+\.\S+$/.test(String(to || ""))) {
+  const { to, name, subject, body, recipients } = await req.json().catch(() => ({}));
+  const okEmail = (e) => /^\S+@\S+\.\S+$/.test(String(e || ""));
+  // Group-office sends pass a recipients array (all contacts across the group's offices)
+  const list = Array.isArray(recipients)
+    ? recipients.filter((r) => okEmail(r?.email)).slice(0, 100).map((r) => ({ email: String(r.email), name: String(r.name || "") }))
+    : null;
+  if (list ? list.length === 0 : !okEmail(to)) {
     return NextResponse.json({ error: "No valid recipient email." }, { status: 400 });
   }
   if (!String(subject || "").trim() || !String(body || "").trim()) {
     return NextResponse.json({ error: "Subject and message are required." }, { status: 400 });
   }
   // sender's uploaded signature image rides along on every outgoing template
-  const ok = await sendClientEmail(String(to), String(name || ""), String(subject), String(body), me.signature_image || "");
+  const ok = await sendClientEmail(list || String(to), String(name || ""), String(subject), String(body), me.signature_image || "");
   if (!ok) return NextResponse.json({ error: "Send failed — Brevo not configured or rejected the message." }, { status: 502 });
   return NextResponse.json({ ok: true });
 }

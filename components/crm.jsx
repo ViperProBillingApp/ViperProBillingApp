@@ -647,7 +647,7 @@ export default function CRM({ user }) {
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
-        officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} onOpen={setDetailId} />}
+        officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
@@ -1431,8 +1431,32 @@ function PastCharges({ client, state }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], onOpen, currentUser }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, currentUser }) {
   const set = (patch) => onUpdate(client.id, patch);
+  const [showGroup, setShowGroup] = useState(false);
+  // Apply a group-offices selection: current client + ids share the group name;
+  // unchecked former members revert to standalone. Group pricing (if active)
+  // survives — new members join covered, the master's amount re-tiers.
+  const applyGroup = (name, ids) => {
+    const groupPricing = client.multiOffice && client.priceMode === "group";
+    const prevIds = new Set(officeSiblings.map((o) => o.id));
+    officeSiblings.filter((o) => !ids.includes(o.id)).forEach((o) =>
+      onUpdate(o.id, { officeGroup: "", multiOffice: false, priceMode: "per-office", groupBillingMaster: false }));
+    ids.forEach((id) => onUpdate(id, {
+      officeGroup: name, multiOffice: true,
+      // joining offices never arrive as a master; covered if group pricing is on
+      ...(prevIds.has(id) ? {} : { groupBillingMaster: false, ...(groupPricing ? { priceMode: "group" } : {}) }),
+    }));
+    onUpdateWithLog(client.id, { officeGroup: name, multiOffice: true }, "group", `Grouped ${ids.length + 1} offices as “${name}”`);
+    if (groupPricing) {
+      const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
+      const tier = groupTierFor(ids.length + 1, tiers);
+      const masterSib = officeSiblings.find((o) => o.groupBillingMaster);
+      if (client.groupBillingMaster) onUpdate(client.id, { amount: client.cadence === "annual" ? tier.y : tier.m });
+      else if (masterSib && ids.includes(masterSib.id)) onUpdate(masterSib.id, { amount: masterSib.cadence === "annual" ? tier.y : tier.m });
+      else onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m }); // master left — this card takes over
+    }
+  };
   // Group pricing has ONE active price: choosing "Group" here makes THIS card
   // the group's billing master (amount auto-set from the office-count tier) and
   // puts every sibling into covered mode; "Per-office" reactivates everyone.
@@ -1656,9 +1680,22 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
           </div>
 
           {/* Multi-office group billing: membership, tiers, master/covered states */}
-          {client.multiOffice && (
+          {client.multiOffice ? (
             <GroupBilling client={client} settings={settings} officeSiblings={officeSiblings}
-              onUpdate={onUpdate} onUpdateSettings={onUpdateSettings} onOpen={onOpen} onDeleteAny={onDeleteAny} />
+              onUpdate={onUpdate} onUpdateSettings={onUpdateSettings} onOpen={onOpen} onDeleteAny={onDeleteAny}
+              onManage={() => setShowGroup(true)} />
+          ) : (
+            <Section title="Multi-office">
+              <div className="flex items-center justify-between" style={{ gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: C.sub }}>Part of a chain? Group offices to bill them together.</span>
+                <SolidBtn onClick={() => setShowGroup(true)}>Group offices</SolidBtn>
+              </div>
+            </Section>
+          )}
+          {showGroup && (
+            <GroupOfficesModal client={client} allClients={allClients} officeSiblings={officeSiblings}
+              onClose={() => setShowGroup(false)}
+              onSave={(name, ids) => { applyGroup(name, ids); setShowGroup(false); }} />
           )}
 
           {/* Viper subscription — user count + tiered pricing, for Viper customers */}
@@ -2009,7 +2046,7 @@ function IconTip({ label, onClick, children }) {
     </span>
   );
 }
-function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdateSettings, onOpen, onDeleteAny }) {
+function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdateSettings, onOpen, onDeleteAny, onManage }) {
   const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
   const [edit, setEdit] = useState(false);
   const count = officeSiblings.length + 1;
@@ -2072,6 +2109,12 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
           </IconTip>
         </div>
       ))}
+      {onManage && (
+        <button onClick={onManage}
+          style={{ marginTop: 6, width: "100%", fontSize: 12, fontWeight: 600, color: C.action, background: C.paper, border: `1px dashed ${C.line}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}>
+          + Group offices — add or remove
+        </button>
+      )}
 
       {master && edit && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
@@ -2095,6 +2138,51 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
 }
 
 // Maritz portal pricing. Single-office prices + setup fee are GLOBAL (settings).
+// Pick companies to group as offices under one name — search + tick boxes.
+// Existing members arrive pre-ticked; unticking removes them on save.
+function GroupOfficesModal({ client, allClients = [], officeSiblings = [], onSave, onClose }) {
+  const [name, setName] = useState(client.officeGroup || client.company || "");
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(() => new Set(officeSiblings.map((o) => o.id)));
+  const toggle = (id) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const list = useMemo(() => {
+    const k = q.trim().toLowerCase();
+    return allClients
+      .filter((c) => c.id !== client.id && !c.archivedClient && !c.formerCustomer)
+      .filter((c) => !k || [c.company, c.name, c.email].some((s) => (s || "").toLowerCase().includes(k)))
+      .sort((a, b) => (a.company || a.name || "").localeCompare(b.company || b.name || ""));
+  }, [allClients, client.id, q]);
+  return (
+    <Modal title="Group offices" onClose={onClose}>
+      <p style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>
+        Tick the companies that belong with <span style={{ fontWeight: 700, color: C.ink }}>{client.company || client.name}</span>. They'll share one group for billing.
+      </p>
+      <Field label="Group name"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Destination Asia" /></Field>
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies" autoFocus
+        style={{ ...inputStyle, marginBottom: 8 }} />
+      <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, maxHeight: 300, overflow: "auto", marginBottom: 12 }}>
+        {list.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: C.faint, textAlign: "center" }}>No companies match “{q.trim()}”.</div>}
+        {list.map((c) => (
+          <label key={c.id} className="flex items-center" style={{ gap: 9, padding: "7px 11px", borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", background: sel.has(c.id) ? "#F0F4FA" : "transparent" }}>
+            <input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} />
+            <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
+            {c.officeGroup && c.officeGroup !== client.officeGroup && <MiniPill fg={C.amber} bg={C.amberBg}>in “{c.officeGroup}”</MiniPill>}
+          </label>
+        ))}
+      </div>
+      <div className="flex items-center justify-between" style={{ gap: 8 }}>
+        <span style={{ fontSize: 12, color: C.sub, fontFamily: MONO }}>{sel.size + 1} office{sel.size ? "s" : ""} in group</span>
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <GhostBtn onClick={onClose}>Cancel</GhostBtn>
+          <SolidBtn disabled={!name.trim() || sel.size === 0} onClick={() => onSave(name.trim(), [...sel])}>
+            Group {sel.size + 1} offices
+          </SolidBtn>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSiblings = [] }) {
   const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 500 };
   const [edit, setEdit] = useState(false);
@@ -2157,7 +2245,7 @@ function Tab({ active, onClick, children }) {
   );
 }
 function MiniBtn({ solid, onClick, children }) { return <button onClick={onClick} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{children}</button>; }
-function SolidBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: "pointer", border: "none", background: C.action, color: "#fff" }}>{children}</button>; }
+function SolidBtn({ onClick, disabled, children }) { return <button onClick={onClick} disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: disabled ? "default" : "pointer", border: "none", background: disabled ? C.grey : C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
 // A select whose box hugs its content instead of stretching full-width, so

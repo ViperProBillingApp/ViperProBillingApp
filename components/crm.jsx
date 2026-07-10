@@ -627,7 +627,8 @@ export default function CRM({ user }) {
         ) : (
           <>
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
-            {tab === "workflow" && <WorkflowTab clients={active} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
+            {/* Archived former customers still surface on the board while marked for deletion */}
+            {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
@@ -1755,8 +1756,10 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               {client.archivedClient ? "Restore client" : "Archive client"}
             </button>
             <button
-              onClick={() => onUpdateWithLog(client.id, { formerCustomer: !client.formerCustomer }, "status", client.formerCustomer ? "Reinstated as customer" : "Marked no longer a customer")}
-              title={client.formerCustomer ? "Reinstate as a current customer" : "Mark as no longer a customer"}
+              onClick={() => client.formerCustomer
+                ? onUpdateWithLog(client.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted" }, "status", "Reinstated as customer")
+                : onUpdateWithLog(client.id, { formerCustomer: true, archivedClient: true, stage: "marked-deletion", workflowHidden: false }, "status", "No longer a customer — archived, marked for deletion")}
+              title={client.formerCustomer ? "Reinstate as a current customer" : "Archive this card and mark it for deletion in the workflow"}
               style={footBtn(client.formerCustomer ? null : C.red)}>
               {client.formerCustomer ? "↩ Reinstate customer" : "No longer a customer"}
             </button>

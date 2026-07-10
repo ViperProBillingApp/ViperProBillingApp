@@ -1228,6 +1228,8 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       l = clients.filter((c) =>
         aud === "grp:maritz" ? c.maritzPortal :
         aud === "grp:viper" ? c.viperCustomer :
+        // billable multi-office entities: group cards + independently billed offices
+        aud === "grp:multi" ? c.multiOffice && (c.groupBillingMaster || c.priceMode !== "group") :
         c.billingStatus === aud.slice(5));
       l = [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || (a.company || a.name).localeCompare(b.company || b.name));
     } else if (type === "deletion") {
@@ -1314,6 +1316,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
           ...Object.entries(BILLING).map(([k, v]) => [`bill:${k}`, v.label]),
           ["grp:maritz", "Maritz Portal customers"],
           ["grp:viper", "Viper Customers"],
+          ["grp:multi", "Multi-office"],
         ]} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
           style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
@@ -1554,6 +1557,16 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
+            {/* Office inside a group: one click back to the group billing card */}
+            {client.multiOffice && !client.groupBillingMaster && (() => {
+              const master = officeSiblings.find((o) => o.groupBillingMaster);
+              return master ? (
+                <button onClick={() => onOpen?.(master.id)}
+                  style={{ background: "#E7EDF8", border: "none", color: "#3B5BA5", fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 20, cursor: "pointer", marginTop: 4 }}>
+                  ← Back to {master.company || client.officeGroup} group
+                </button>
+              ) : null;
+            })()}
           </div>
           {/* Segment status — right-aligned against the card edge */}
           <div className="flex items-center" style={{ gap: 12, flexShrink: 0 }}>
@@ -2148,6 +2161,10 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
         <div key={o.id} className="flex items-center" style={{ gap: 8, padding: "6px 8px", background: C.paper, border: `1px solid ${C.lineSoft}`, borderRadius: 8, marginBottom: 4 }}>
           <button onClick={() => onOpen?.(o.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: C.ink, textAlign: "left", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title="Open this office">
             {o.company}
+          </button>
+          <button onClick={() => onOpen?.(o.id)} title={`${o.inChargeOver ? "In ChargeOver" : "Not in ChargeOver"} · ${BILLING[o.billingStatus]?.label || ""} — open office`}
+            style={{ background: o.inChargeOver ? C.greenBg : C.greyBg, color: o.inChargeOver ? C.green : C.faint, border: "none", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, cursor: "pointer", flexShrink: 0 }}>
+            {o.inChargeOver ? "CO ✓" : "no CO"}
           </button>
           {o.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
           <IconTip label="Remove from Grouping" onClick={() => removeFromGroup(o)}>

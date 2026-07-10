@@ -703,7 +703,14 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
   const [copied, setCopied] = useState(false);
   const [send, setSend] = useState({ busy: false, err: "" });
   const copy = () => { navigator.clipboard?.writeText(`From: ${FROM_EMAIL}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
-  const markSent = (via) => onLogSent(client.id, key, { sentAt: new Date().toISOString(), via, subject, body, label: tpl.label }, tpl.label);
+  const markSent = (via) => {
+    const now = new Date().toISOString();
+    // Sent = contacted: leave the email queue and start the 10-day reply clock.
+    onLogSent(client.id, key, { sentAt: now, via, subject, body, label: tpl.label, dismissedAt: now }, tpl.label);
+    if (client.stage !== "marked-deletion") {
+      onUpdateWithLog?.(client.id, { stage: "contacted-awaiting", stageAt: now }, "stage", "Email sent — Contacted · awaiting reply");
+    }
+  };
   const sendNow = async () => {
     setSend({ busy: true, err: "" });
     try {
@@ -745,7 +752,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <GhostBtn onClick={() => { markSent("manual"); onDone?.(); }}>Mark sent</GhostBtn>
         {saved.sentAt && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
         {saved.sentAt && (
-          <button onClick={() => onLogSent(client.id, key, { sentAt: null, via: null }, tpl.label)}
+          <button onClick={() => onLogSent(client.id, key, { sentAt: null, via: null, dismissedAt: null }, tpl.label)}
             style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: C.sub, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
             Undo
           </button>
@@ -1077,7 +1084,7 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
                       {c.stage === "contacted-awaiting" && (() => {
                         const t = parseDate(c.stageAt) || parseDate(c.createdAt);
                         const left = t ? Math.max(0, 10 - Math.floor((Date.now() - t) / 86400000)) : 10;
-                        return <div style={{ fontSize: 10.5, color: left <= 2 ? C.amber : C.faint, marginTop: 2 }}>Auto-returns to Need to contact in {left}d</div>;
+                        return <div style={{ fontSize: 10.5, color: left <= 2 ? C.amber : C.faint, marginTop: 2 }}>Contacted {fmtDate(c.stageAt || c.createdAt)} · returns to Need to contact in {left}d</div>;
                       })()}
                     </button>
                     {!showHidden && (
@@ -1158,7 +1165,23 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   const [selId, setSelId] = useState(null);
   const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper
   const [q, setQ] = useState("");
+  const [view, setView] = useState("compose"); // compose | sent
+  const [sq, setSq] = useState("");
   const key = `${type}:${periodKey()}`;
+
+  // Every sent email across all clients, newest first — the tab's sent archive.
+  const sentEmails = useMemo(() =>
+    clients.flatMap((c) => Object.entries(c.reminders || {})
+      .filter(([, v]) => v.sentAt)
+      .map(([k, v]) => ({ c, k, v })))
+      .sort((a, b) => new Date(b.v.sentAt) - new Date(a.v.sentAt)),
+    [clients]);
+  const sentFiltered = useMemo(() => {
+    const k = sq.trim().toLowerCase();
+    if (!k) return sentEmails;
+    return sentEmails.filter(({ c, v }) =>
+      [c.company, c.name, c.email, v.subject, v.body, v.label].some((s) => (s || "").toLowerCase().includes(k)));
+  }, [sentEmails, sq]);
 
   const [fullAudience, skipped] = useMemo(() => {
     let l;
@@ -1207,6 +1230,42 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     deletion: "accounts marked for deletion",
   }[type] || "all contactable clients";
 
+  if (view === "sent") {
+    const shown = sentFiltered.slice(0, 150);
+    return (
+      <div>
+        <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
+          <GhostBtn onClick={() => setView("compose")}>← Back to compose</GhostBtn>
+          <input value={sq} onChange={(e) => setSq(e.target.value)} placeholder="Search sent emails" autoFocus
+            style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${sq.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
+          <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
+            {sq.trim() ? `${sentFiltered.length} of ${sentEmails.length}` : sentEmails.length} sent
+          </span>
+        </div>
+        {shown.length === 0 ? (
+          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+            {sq.trim() ? `No sent emails match “${sq.trim()}”.` : "No emails sent yet — copies appear here after you send."}
+          </div>
+        ) : (
+          <div style={{ maxWidth: 760 }}>
+            {shown.map(({ c, k, v }) => (
+              <div key={`${c.id}:${k}`} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 14px 4px", marginBottom: 8 }}>
+                <button onClick={() => onOpen?.(c.id)} title="Open client"
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 700, color: C.ink, textDecoration: "underline", textDecorationColor: C.lineSoft, textUnderlineOffset: 3 }}>
+                  {c.company || c.name}
+                </button>
+                <SentCommRow tKey={k} v={v} />
+              </div>
+            ))}
+            {sentFiltered.length > shown.length && (
+              <p style={{ fontSize: 12, color: C.faint, textAlign: "center", margin: "12px 0 0" }}>Showing the {shown.length} most recent — search to narrow the rest.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
@@ -1223,6 +1282,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
           {sentCount}/{fullAudience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
         </span>
+        <GhostBtn onClick={() => setView("sent")}>Sent emails ({sentEmails.length})</GhostBtn>
       </div>
       {!client ? (
         <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
@@ -1271,8 +1331,8 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               </div>
               <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
-            {/* After a send, stay on this client (so the status dropdowns are usable); the Done button advances. */}
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={() => setSelId(client.id)} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
+            {/* Sending auto-dismisses the card, so move straight to the next recipient. */}
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} />
           </div>
         </div>
       )}

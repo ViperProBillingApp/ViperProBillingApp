@@ -1752,7 +1752,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
 
           {/* Viper subscription — user count + tiered pricing, for Viper customers */}
           {(client.segment === "viper-current" || client.viperCustomer) && (
-            <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} />
+            <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} onUpdate={set} />
           )}
 
           {/* Maritz portal pricing — single-office clients (groups price via GroupBilling) */}
@@ -1917,7 +1917,11 @@ const LAST_LOGIN_IDX = 7;
 // Sort key for "most recent login first" — blanks / "-" sink to the bottom.
 function lastLoginTime(u) { const d = parseDate(u && u[LAST_LOGIN_IDX]); return d ? d.getTime() : -Infinity; }
 // A user counts as "current" if not terminated and not expired.
-function isCurrentUser(u) { const t = u[5], e = u[6]; const blank = (v) => !v || v === "-"; return blank(t) && blank(e); }
+function isCurrentUser(u) {
+  // "Administrator, Site" is the portal's built-in system account — never billable
+  if ((u[0] || "").toLowerCase().replace(/[^a-z]/g, "") === "administratorsite") return false;
+  const t = u[5], e = u[6]; const blank = (v) => !v || v === "-"; return blank(t) && blank(e);
+}
 // Plain-text block of a user list for pasting into an email to the client.
 function userListToText(client, list) {
   const lines = [`${client.company || client.name} — portal users (collected ${fmtDate(list.collectedAt)})`, ""];
@@ -2048,7 +2052,7 @@ function viperMonthly(n, p) {
   return n * (Number(p.tier3) || 0);
 }
 // Viper subscription: current user count + tiered price. Pricing is GLOBAL (settings) — editing here changes every Viper card.
-function ViperSubscription({ client, settings, onUpdateSettings }) {
+function ViperSubscription({ client, settings, onUpdateSettings, onUpdate }) {
   const p = settings.viperPricing || { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10 };
   const [edit, setEdit] = useState(false);
   const n = currentUserCount(client);
@@ -2067,6 +2071,12 @@ function ViperSubscription({ client, settings, onUpdateSettings }) {
         <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}/mo</span>
       </div>
       <div style={{ fontSize: 11.5, color: C.faint }}>{tier}</div>
+      {onUpdate && total > 0 && Number(client.amount) !== total && (
+        <button onClick={() => onUpdate({ amount: total })}
+          style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", marginTop: 8 }}>
+          Update Amount to {money(total, "USD")} (currently {money(client.amount, "USD")})
+        </button>
+      )}
       {edit && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
           <div style={{ fontSize: 11, color: C.amber, fontWeight: 600, marginBottom: 8 }}>Global — applies to every Viper customer.</div>

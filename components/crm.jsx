@@ -1220,7 +1220,15 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
           <button onClick={() => onOpen(client.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink }}>{client.company || client.name}</button>
           <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}><span style={{ textDecoration: "line-through", color: C.red }}>{client.email}</span> · {client.name}</div>
         </div>
-        <SolidBtn onClick={run}>{busy ? "Searching…" : client.candidates?.length ? "Search again" : "Find alternative contact"}</SolidBtn>
+        <div className="flex items-center" style={{ gap: 8 }}>
+          <SolidBtn onClick={run}>{busy ? "Searching…" : client.candidates?.length ? "Search again" : "Find alternative contact"}</SolidBtn>
+          <button onClick={() => onUpdate(client.id, { emailStatus: "ok", candidates: [], activity: logActivity(client, "contact", "Removed from contact recovery — email marked deliverable") })}
+            title="Remove from this list (marks the email deliverable again)" aria-label="Remove from recovery list"
+            style={{ background: "none", border: "none", color: C.faint, fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4, borderRadius: 6 }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = C.red)} onMouseLeave={(e) => (e.currentTarget.style.color = C.faint)}>
+            ✕
+          </button>
+        </div>
       </div>
       {err && <div style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{err}</div>}
       {client.candidates?.length > 0 && (

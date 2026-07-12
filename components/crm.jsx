@@ -417,7 +417,8 @@ export default function CRM({ user }) {
       if (c.id !== id) return c;
       const reminders = { ...(c.reminders || {}) };
       reminders[key] = { ...(reminders[key] || {}), ...patch };
-      const activity = patch.sentAt ? logActivity(c, "email", `${label} marked sent`)
+      // sends carry a ref to the stored copy so Activity can show the email
+      const activity = patch.sentAt ? [{ at: new Date().toISOString(), type: "email", text: `${label} sent`, ref: key }, ...(c.activity || [])].slice(0, 200)
         : patch.sentAt === null ? logActivity(c, "email", `${label || "Email"} unmarked as sent`)
         : c.activity;
       return { ...c, reminders, activity };
@@ -1744,12 +1745,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               <input style={{ ...inputStyle, flex: 1 }} placeholder="Log a note — call, promise, anything" value={note} onChange={(e) => setNote(e.target.value)} />
               <GhostBtn onClick={() => { if (note.trim()) { onUpdateWithLog(client.id, {}, "note", note.trim()); setNote(""); } }}>Log</GhostBtn>
             </div>
-            {(client.activity || []).slice(0, 12).map((a, i) => (
-              <div key={i} style={{ fontSize: 12, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
-                <span style={{ fontFamily: MONO, color: C.faint }}>{fmtDate(a.at)}</span>
-                <span style={{ color: C.sub, marginLeft: 8 }}>{a.text}</span>
-              </div>
-            ))}
+            {(client.activity || []).slice(0, 12).map((a, i) => <ActivityRow key={i} a={a} client={client} />)}
             {(client.activity || []).length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No activity yet.</div>}
           </Section>
 
@@ -1818,13 +1814,14 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               onSave={(name, ids) => { applyGroup(name, ids); setShowGroup(false); }} />
           )}
 
-          {/* Viper subscription — user count + tiered pricing, for Viper customers */}
-          {(client.segment === "viper-current" || client.viperCustomer) && (
+          {/* Pricing section follows the SEGMENT (top-right dropdown), not the
+              relationship flags — many cards are both Maritz and Viper. */}
+          {["viper-current", "viper-past"].includes(client.segment) && (
             <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} onUpdate={set} />
           )}
 
           {/* Maritz portal pricing — single-office clients (groups price via GroupBilling) */}
-          {!client.multiOffice && (client.segment === "maritz-portal" || client.maritzPortal) && (
+          {!client.multiOffice && client.segment === "maritz-portal" && (
             <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
           )}
 
@@ -1934,6 +1931,31 @@ function NotesSection({ client, onUpdate, userName }) {
 }
 
 /* ------------------------------ Shared ------------------------------ */
+// One Activity line. Email sends carry a ref into client.reminders — those
+// rows get a "View email" link that expands the exact copy that went out.
+function ActivityRow({ a, client }) {
+  const [open, setOpen] = useState(false);
+  const mail = a.ref ? client.reminders?.[a.ref] : null;
+  const viewable = mail && (mail.subject || mail.body);
+  return (
+    <div style={{ fontSize: 12, padding: "5px 0", borderBottom: `1px solid ${C.lineSoft}` }}>
+      <span style={{ fontFamily: MONO, color: C.faint }}>{fmtDate(a.at)}</span>
+      <span style={{ color: C.sub, marginLeft: 8 }}>{a.text}</span>
+      {viewable && (
+        <button onClick={() => setOpen((o) => !o)}
+          style={{ background: "none", border: "none", padding: 0, marginLeft: 8, fontSize: 12, fontWeight: 600, color: C.action, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
+          {open ? "Hide email ▴" : "View email ▾"}
+        </button>
+      )}
+      {open && viewable && (
+        <div style={{ marginTop: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontSize: 12.5 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>{mail.subject || "(no subject saved)"}</div>
+          <div style={{ whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{mail.body || "(message not saved)"}</div>
+        </div>
+      )}
+    </div>
+  );
+}
 // One sent-email row in the client card — collapsed to label+date, expands to
 // the exact subject/body/channel that went out.
 function SentCommRow({ tKey, v }) {

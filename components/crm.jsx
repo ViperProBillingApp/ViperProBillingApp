@@ -301,6 +301,7 @@ function normalise(r) {
     cadence: CADENCE[r.cadence] ? r.cadence : "monthly",
     currency: SYMBOL[r.currency] ? r.currency : "",
     coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
+    coAmountAt: r.coAmountAt || "", // when the recurring amount was last read from CO billing packages
     // Field-absent (undefined) means this record predates inChargeOver and was
     // never explicitly set — infer true from having a ChargeOver ID rather than
     // silently defaulting to false, so an old cached client state can't wipe it.
@@ -1603,7 +1604,10 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
   }, [client.chargeoverId]);
   // Prefill Amount from the most recent invoice when no amount is set — stays editable.
   useEffect(() => {
-    if (client.amount || !inv.invoices.length) return;
+    // Once the sync has read the client's CO billing packages, that amount is
+    // authoritative — amount 0 then means "no active recurring package", and
+    // prefilling from an old invoice would re-poison the MRR metric.
+    if (client.amount || client.coAmountAt || !inv.invoices.length) return;
     // voided / written-off invoices never drive the recurring amount
     const latest = [...inv.invoices].filter((i) => !i.voided).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
     if (latest && Number(latest.total) > 0) onUpdate(client.id, { amount: Number(latest.total) });

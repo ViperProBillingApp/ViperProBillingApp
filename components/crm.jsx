@@ -103,21 +103,27 @@ function periodsBehind(c, now = new Date()) {
   if (now.getDate() < day) diff -= 1; // current period not yet due if we're before the billing day
   return Math.max(0, Math.min(24, Math.floor(diff / cad)));
 }
+// What's actually owed RIGHT NOW. ChargeOver pre-generates upcoming invoices,
+// so the raw customer balance can include charges that aren't due yet — the
+// sync stores the overdue-only figure in coOverdue, which wins when present.
+function owedBalance(c) { return c.coOverdue != null ? c.coOverdue : c.coBalance; }
 // Real ChargeOver balance beats the calendar-based guess whenever we have one —
 // dividing it by the recorded rate gives "how many periods' worth is owed"
 // without depending on billingDay/lastPaid bookkeeping being accurate. This is
 // what makes "final notice" and "total owed" trustworthy for synced clients.
 function arrearsPeriods(c, now = new Date()) {
   if (coveredByGroup(c)) return 0;
-  if (c.coBalance != null && Number(c.amount) > 0) {
-    if (c.coBalance <= 0) return 0;
-    return Math.max(1, Math.min(24, Math.round(c.coBalance / Number(c.amount))));
+  const owed = owedBalance(c);
+  if (owed != null && Number(c.amount) > 0) {
+    if (owed <= 0) return 0;
+    return Math.max(1, Math.min(24, Math.round(owed / Number(c.amount))));
   }
   return periodsBehind(c, now);
 }
 function totalOwed(c, now = new Date()) {
   if (coveredByGroup(c)) return 0;
-  if (c.coBalance != null) return Math.max(0, c.coBalance);
+  const owed = owedBalance(c);
+  if (owed != null) return Math.max(0, owed);
   return periodsBehind(c, now) * (Number(c.amount) || 0);
 }
 // Who needs a payment reminder. periodsBehind only works once we know recurring
@@ -302,6 +308,7 @@ function normalise(r) {
     currency: SYMBOL[r.currency] ? r.currency : "",
     coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
     coAmountAt: r.coAmountAt || "", // when the recurring amount was last read from CO billing packages
+    coOverdue: r.coOverdue != null ? Number(r.coOverdue) || 0 : null, // overdue-only balance; null = not synced yet
     // Field-absent (undefined) means this record predates inChargeOver and was
     // never explicitly set — infer true from having a ChargeOver ID rather than
     // silently defaulting to false, so an old cached client state can't wipe it.
@@ -870,7 +877,8 @@ function StatStrip({ clients, settings, bounced }) {
         // billed via group master — its own balance never counts as owed
       } else if (c.coBalance != null) {
         synced++;
-        if (c.coBalance > 0) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + c.coBalance; }
+        const owed = owedBalance(c);
+        if (owed > 0) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + owed; }
       } else {
         const behind = periodsBehind(c, now);
         if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
@@ -1528,8 +1536,11 @@ function PastCharges({ client, state }) {
         </div>
       )}
       {client.coBalance != null && (
-        <div style={{ fontSize: 12.5, marginBottom: 8, color: client.coBalance > 0 ? C.red : C.green, fontWeight: 600 }}>
-          Live balance: {money(client.coBalance, client.currency)} <span style={{ color: C.faint, fontWeight: 500 }}>· as of last sync</span>
+        <div style={{ fontSize: 12.5, marginBottom: 8, color: owedBalance(client) > 0 ? C.red : C.green, fontWeight: 600 }}>
+          Live balance: {money(client.coBalance, client.currency)}
+          <span style={{ color: C.faint, fontWeight: 500 }}>
+            {" "}· as of last sync{client.coOverdue != null && client.coBalance > client.coOverdue ? ` · ${money(client.coBalance - client.coOverdue, client.currency)} of this is an upcoming invoice, not yet due` : ""}
+          </span>
         </div>
       )}
       {state.loading && <div style={{ fontSize: 12, color: C.faint }}>Loading from ChargeOver…</div>}
@@ -1821,6 +1832,13 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
                 <span style={{ fontSize: 12.5, color: C.sub }}>Part of a chain? Group offices to bill them together.</span>
                 <SolidBtn onClick={() => setShowGroup(true)}>Group offices</SolidBtn>
               </div>
+              {/* single office billed at group rates (e.g. Eventis): flips the card
+                  to group billing and hides Maritz portal pricing */}
+              <label className="flex items-center" style={{ gap: 7, fontSize: 12.5, color: C.ink, cursor: "pointer", marginTop: 10 }}>
+                <input type="checkbox" checked={false}
+                  onChange={() => onUpdateWithLog(client.id, { multiOffice: true, priceMode: "group", groupBillingMaster: true, officeGroup: client.officeGroup || client.company || client.name }, "status", "Multi-office billing switched on — pays group rates")} />
+                Multi-office billing — pay group rates (replaces Maritz portal pricing)
+              </label>
             </Section>
           )}
           {showGroup && (

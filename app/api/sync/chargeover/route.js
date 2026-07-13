@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
-import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts } from "../../../../lib/chargeover.js";
+import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
@@ -11,7 +11,8 @@ async function runSync() {
   const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
   const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: {} };
   const customers = await fetchAllCustomers();
-  const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer));
+  const overdue = await fetchOverdueMap().catch(() => null); // best-effort; falls back to raw balance
+  const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer), overdue);
   const { filled, remaining } = await backfillRecurringAmounts(clients);
   // bump the rev so open tabs holding pre-sync state can't clobber the sync
   const next = { clients, settings: state.settings || {}, rev: (state.rev || 0) + 1 };

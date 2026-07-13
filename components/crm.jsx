@@ -660,7 +660,8 @@ export default function CRM({ user }) {
       {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
-        officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId} />}
+        officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId}
+        onAddClient={(rec) => setClients((p) => [...p, normalise(rec)])} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
         officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
@@ -825,7 +826,6 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
           {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
         </button>
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
-        <GhostBtn onClick={() => { markSent("manual"); onDone?.(); }}>Mark sent</GhostBtn>
         {saved.sentAt && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
         {saved.sentAt && (
           <button onClick={() => onLogSent(client.id, key, { sentAt: null, via: null, dismissedAt: null }, tpl.label)}
@@ -1144,8 +1144,9 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
         </label>
       )}
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
-        {/* "Up to date" cards leave the board automatically, so no column for it */}
-        {STAGE_ORDER.filter((s) => s !== "up-to-date").map((stage) => {
+        {/* "Up to date" cards leave the board automatically, so no column for it —
+            EXCEPT in the removed-from-workflow view, where most hidden cards live */}
+        {STAGE_ORDER.filter((s) => showHidden || s !== "up-to-date").map((stage) => {
           const col = visible.filter((c) => c.stage === stage);
           return (
             <div key={stage}
@@ -1564,30 +1565,44 @@ function PastCharges({ client, state }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, currentUser }) {
+function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onAddClient, currentUser }) {
   const set = (patch) => onUpdate(client.id, patch);
   const [showGroup, setShowGroup] = useState(false);
-  // Apply a group-offices selection: current client + ids share the group name;
-  // unchecked former members revert to standalone. Group pricing (if active)
-  // survives — new members join covered, the master's amount re-tiers.
+  // Apply a group-offices selection: the offices become covered members and
+  // billing lives on a dedicated "<Name> (Group)" master card — reused if the
+  // group already has one, created with a FRESH billing history otherwise.
   const applyGroup = (name, ids) => {
-    const groupPricing = client.multiOffice && client.priceMode === "group";
-    const prevIds = new Set(officeSiblings.map((o) => o.id));
+    // managing from the group card itself: members are just the ticked offices
+    const isMaster = client.multiOffice && client.priceMode === "group" && client.groupBillingMaster;
+    const memberIds = isMaster ? ids : [client.id, ...ids];
+    // unchecked former members revert to standalone
     officeSiblings.filter((o) => !ids.includes(o.id)).forEach((o) =>
       onUpdate(o.id, { officeGroup: "", multiOffice: false, priceMode: "per-office", groupBillingMaster: false }));
-    ids.forEach((id) => onUpdate(id, {
-      officeGroup: name, multiOffice: true,
-      // joining offices never arrive as a master; covered if group pricing is on
-      ...(prevIds.has(id) ? {} : { groupBillingMaster: false, ...(groupPricing ? { priceMode: "group" } : {}) }),
-    }));
-    onUpdateWithLog(client.id, { officeGroup: name, multiOffice: true }, "group", `Grouped ${ids.length + 1} offices as “${name}”`);
-    if (groupPricing) {
-      const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
-      const tier = groupTierFor(ids.length + 1, tiers);
-      const masterSib = officeSiblings.find((o) => o.groupBillingMaster);
-      if (client.groupBillingMaster) onUpdate(client.id, { amount: client.cadence === "annual" ? tier.y : tier.m });
-      else if (masterSib && ids.includes(masterSib.id)) onUpdate(masterSib.id, { amount: masterSib.cadence === "annual" ? tier.y : tier.m });
-      else onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m }); // master left — this card takes over
+    // every member joins covered — old office-masters get demoted too
+    memberIds.forEach((id) => onUpdate(id, { officeGroup: name, multiOffice: true, priceMode: "group", groupBillingMaster: false }));
+    const tiers = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
+    const tier = groupTierFor(memberIds.length, tiers);
+    const existingMaster = isMaster ? client
+      : allClients.find((c) => c.groupBillingMaster && c.priceMode === "group" && (c.officeGroup || "").trim().toLowerCase() === name.trim().toLowerCase() && !memberIds.includes(c.id));
+    if (existingMaster) {
+      onUpdateWithLog(existingMaster.id, { officeGroup: name, multiOffice: true, priceMode: "group", groupBillingMaster: true, amount: existingMaster.cadence === "annual" ? tier.y : tier.m },
+        "group", `Group updated: ${memberIds.length} offices under “${name}”`);
+      onOpen?.(existingMaster.id);
+    } else if (onAddClient) {
+      const master = {
+        id: uid(),
+        name: client.name || "", email: client.email || "", phone: "",
+        company: `${name} (Group)`,
+        segment: "maritz-portal", billingStatus: "never-charged", stage: "not-contacted",
+        tags: [], amount: tier.m, billingDay: 1, cadence: "monthly", currency: "",
+        maritzPortal: true, viperCustomer: false, inChargeOver: false,
+        multiOffice: true, officeGroup: name, priceMode: "group", groupBillingMaster: true, emailPrimaryOnly: false,
+        secondaryContacts: [], payments: [], reminders: {}, noteCards: [], followUp: "", emailStatus: "ok",
+        activity: [{ at: new Date().toISOString(), type: "group", text: `Group billing card created for ${memberIds.length} “${name}” offices — new billing history starts here` }],
+        createdAt: iso(),
+      };
+      onAddClient(master);
+      onOpen?.(master.id);
     }
   };
   // Group pricing has ONE active price: choosing "Group" here makes THIS card

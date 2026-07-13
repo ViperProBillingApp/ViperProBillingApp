@@ -1520,6 +1520,13 @@ function PastCharges({ client, state }) {
   };
   return (
     <Section title="Past charges (ChargeOver)" action={state.invoices.length > 0 ? <CopyLink getText={copyText} /> : null}>
+      {/* upcoming invoice from the active ChargeOver billing package */}
+      {state.next?.date && (
+        <div className="flex items-baseline justify-between" style={{ gap: 8, background: "#E7EDF8", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3B5BA5" }}>Next invoice · {fmtDate(state.next.date)}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, fontFamily: MONO, color: "#3B5BA5" }}>{money(state.next.amount, client.currency || "USD")}</span>
+        </div>
+      )}
       {client.coBalance != null && (
         <div style={{ fontSize: 12.5, marginBottom: 8, color: client.coBalance > 0 ? C.red : C.green, fontWeight: 600 }}>
           Live balance: {money(client.coBalance, client.currency)} <span style={{ color: C.faint, fontWeight: 500 }}>· as of last sync</span>
@@ -1607,7 +1614,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
     setInv({ loading: true, invoices: [], error: "" });
     fetch(`/api/chargeover/invoices?co=${encodeURIComponent(client.chargeoverId)}`)
       .then((r) => r.json())
-      .then((d) => { if (alive) setInv({ loading: false, invoices: d.invoices || [], error: d.error || "" }); })
+      .then((d) => { if (alive) setInv({ loading: false, invoices: d.invoices || [], next: d.next || null, error: d.error || "" }); })
       .catch(() => { if (alive) setInv({ loading: false, invoices: [], error: "load" }); });
     return () => { alive = false; };
   }, [client.chargeoverId]);
@@ -2410,10 +2417,12 @@ function GroupOfficesModal({ client, allClients = [], officeSiblings = [], onSav
 function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSiblings = [] }) {
   const p = settings.maritzPricing || { monthly: 40, annual: 400, setupFee: 500 };
   const [edit, setEdit] = useState(false);
-  const b = client.maritzBilling || { cadence: "monthly", includeSetup: false };
+  const b = client.maritzBilling || { includeSetup: false };
   const setB = (patch) => onUpdate({ maritzBilling: { ...b, ...patch } });
   const setP = (patch) => onUpdateSettings({ maritzPricing: { ...p, ...patch } });
-  const base = b.cadence === "annual" ? Number(p.annual) || 0 : Number(p.monthly) || 0;
+  // price follows the card's billing Cadence field (synced from ChargeOver)
+  const cadence = client.cadence === "annual" ? "annual" : "monthly";
+  const base = cadence === "annual" ? Number(p.annual) || 0 : Number(p.monthly) || 0;
   const total = base + (b.includeSetup ? Number(p.setupFee) || 0 : 0);
   const numIn = (val, on, ph) => <input type="number" value={val} placeholder={ph} onChange={(e) => on(e.target.value === "" ? "" : Number(e.target.value))} style={{ ...inputStyle, padding: "7px 9px" }} />;
 
@@ -2421,7 +2430,7 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
     <Section title="Maritz portal pricing" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
       <div className="flex items-center" style={{ gap: 6, marginBottom: 8 }}>
         {["monthly", "annual"].map((cad) => (
-          <button key={cad} onClick={() => setB({ cadence: cad })} style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${b.cadence === cad ? C.action : C.line}`, background: b.cadence === cad ? C.action : C.panel, color: b.cadence === cad ? "#fff" : C.sub }}>
+          <button key={cad} onClick={() => onUpdate({ cadence: cad })} style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${cadence === cad ? C.action : C.line}`, background: cadence === cad ? C.action : C.panel, color: cadence === cad ? "#fff" : C.sub }}>
             {cad === "annual" ? `Annual ${money(p.annual, "USD")}` : `Monthly ${money(p.monthly, "USD")}`}
           </button>
         ))}
@@ -2432,7 +2441,7 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
       </label>
       <div className="flex items-baseline justify-between" style={{ gap: 8, paddingTop: 6, borderTop: `1px solid ${C.lineSoft}` }}>
         <span style={{ fontSize: 12.5, color: C.sub }}>Total{b.includeSetup ? " (incl. setup)" : ""}</span>
-        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}{b.includeSetup ? "" : b.cadence === "annual" ? "/yr" : "/mo"}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: MONO, color: C.green }}>{money(total, "USD")}{b.includeSetup ? "" : cadence === "annual" ? "/yr" : "/mo"}</span>
       </div>
       {edit && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>

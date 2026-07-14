@@ -451,6 +451,20 @@ export default function CRM({ user }) {
     })();
   }, []);
 
+  // Deep-link support so a client can be opened in its own tab/window: the row
+  // is a real link to ?client=<id>; on load we open that drawer, and we keep
+  // the URL in sync as the drawer opens/closes (without a page reload).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("client");
+    if (id) setDetailId(id);
+  }, []);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (detailId) url.searchParams.set("client", detailId);
+    else url.searchParams.delete("client");
+    window.history.replaceState(null, "", url);
+  }, [detailId]);
+
   // Workflow automations, run once per session after load:
   // 1. A due follow-up date pulls the card into "Need to contact" (and back onto the board).
   // 2. "Contacted · awaiting reply" with no stage change for 10 days returns to
@@ -1002,12 +1016,19 @@ function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
 const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const behind = arrearsPeriods(c);
   const cur = c.currency || settings.currency;
+  // Plain left-click opens the drawer in-page; right/cmd/middle-click on the
+  // company-name link lets the browser open ?client=<id> in a new tab/window.
+  const openInPage = (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return;
+    e.preventDefault();
+    onOpen(c.id);
+  };
   return (
-    <div role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+    <div role="button" tabIndex={0} onClick={openInPage} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
       <div style={{ minWidth: 0 }}>
         <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
           <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
-          <span style={{ fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={c.company || c.name}>{c.company || c.name}</span>
+          <a href={`?client=${c.id}`} onClick={openInPage} title={`${c.company || c.name} — right-click to open in a new tab`} style={{ fontSize: 14, fontWeight: 600, color: "inherit", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{c.company || c.name}</a>
           {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
           {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
           {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}

@@ -601,6 +601,8 @@ export default function CRM({ user }) {
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
+        <MenuItem icon="pricing" onClick={() => setModal("pricing")}>Pricing</MenuItem>
+        <MenuItem icon="onboarding" onClick={() => setModal("onboarding")}>Maritz Onboarding</MenuItem>
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
@@ -682,6 +684,8 @@ export default function CRM({ user }) {
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
       {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} user={user} /></Modal>}
+      {modal === "onboarding" && <Modal wide title="Maritz Onboarding — adding a new office" onClose={() => setModal(null)}><MaritzOnboarding /></Modal>}
+      {modal === "pricing" && <Modal wide title="Pricing" onClose={() => setModal(null)}><PricingPanel settings={settings} onSave={setSettings} /></Modal>}
       {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
@@ -703,6 +707,8 @@ function MenuIcon({ name, color }) {
     case "sync": return <svg {...p}><path d="M23 4v6h-6M1 20v-6h6" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>;
     case "users": return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
     case "signout": return <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>;
+    case "onboarding": return <svg {...p}><path d="M9 2h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2V3a1 1 0 0 1 1-1z" /><path d="M9 12l2 2 4-4" /></svg>;
+    case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill={color} stroke="none" /></svg>;
     default: return null;
   }
 }
@@ -718,6 +724,116 @@ function MenuItem({ onClick, active, icon, children }) {
       {icon && <MenuIcon name={icon} color={C.action} />}
       <span>{children}</span>
     </button>
+  );
+}
+
+// Reference checklist for standing up a new Maritz office (transcribed from the
+// team's process notes). Static content — no state, no saving.
+const ONBOARDING_STEPS = [
+  { where: "Admin Site › Offices", text: "Create a new office.", note: "This just creates the Office for access to Viper — you'll create the supplier company profile in a later step." },
+  { where: "Admin Site › Employees", text: "Set up users on the new office:", subs: [
+    "Add a new user (if needed). In the Permissions tab, be sure to add the “Vendor” permission so they have the restricted view.",
+    "Add any additional users — new or existing — to the new office.",
+    "Add the Site Administrator to the new office.",
+  ] },
+  { where: "Viper Site › Maritz HQ office", text: "Log in as the “siteadmin” user and go to the Destinations tab. For each Destination the new office needs to be linked to, open the Destination, select the new office under the list of linked Offices, then click Save." },
+  { where: "Viper Site › Maritz HQ office", text: "Log out of the Maritz HQ office." },
+  { where: "Viper Site › new office", text: "Log in as the “siteadmin” user, go to the Suppliers tab and add a new Supplier with the desired name (it usually matches the Office name). This creates the profile that suppliers can log in and edit." },
+  { where: "Viper Site › new supplier profile", text: "Add the Destination(s) to the new profile, since vendors cannot edit their approved Maritz destinations." },
+  { where: "Script", text: "Run the script to add the new Tariff folders to the new office." },
+];
+function MaritzOnboarding() {
+  return (
+    <div>
+      <p style={{ fontSize: 13, color: C.sub, lineHeight: 1.5, marginBottom: 16 }}>
+        The process for adding a new Maritz office. Work top to bottom — each step notes which site and tab it happens on.
+      </p>
+      <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+        {ONBOARDING_STEPS.map((s, i) => (
+          <li key={i} className="flex" style={{ gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px" }}>
+            <span style={{ flexShrink: 0, width: 24, height: 24, borderRadius: "50%", background: C.action, color: "#fff", fontSize: 12.5, fontWeight: 700, fontFamily: MONO, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.02em", color: "#3B5BA5", marginBottom: 3 }}>{s.where}</div>
+              <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{s.text}</div>
+              {s.subs && (
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 5 }}>
+                  {s.subs.map((sub, j) => <li key={j} style={{ fontSize: 13, color: C.sub, lineHeight: 1.5 }}>{sub}</li>)}
+                </ul>
+              )}
+              {s.note && <div style={{ fontSize: 12, color: C.faint, fontStyle: "italic", marginTop: 6 }}>{s.note}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+// Central editor for the three GLOBAL pricing objects. Edits write straight to
+// settings.viperPricing / .maritzPricing / .maritzGroupTiers — the same objects
+// the client-card pricing sections read, so cards update live everywhere.
+function PricingPanel({ settings, onSave }) {
+  const vp = { base: 300, tier2: 90, tier3: 80, tier2Min: 4, tier3Min: 10, baseY: 3000, tier2Y: 900, tier3Y: 800, ...(settings.viperPricing || {}) };
+  const mp = { monthly: 40, annual: 400, setupFee: 500, ...(settings.maritzPricing || {}) };
+  const gt = { ...GROUP_TIER_DEFAULTS, ...(settings.maritzGroupTiers || {}) };
+  const setVp = (k, v) => onSave((s) => ({ ...s, viperPricing: { ...vp, ...(s.viperPricing || {}), [k]: v } }));
+  const setMp = (k, v) => onSave((s) => ({ ...s, maritzPricing: { ...mp, ...(s.maritzPricing || {}), [k]: v } }));
+  const setGt = (k, v) => onSave((s) => ({ ...s, maritzGroupTiers: { ...gt, ...(s.maritzGroupTiers || {}), [k]: v } }));
+  // plain-function input (not a component) so focus is preserved across edits
+  const num = (val, on) => <input type="number" value={val ?? ""} onChange={(e) => on(e.target.value === "" ? 0 : Number(e.target.value))} style={{ ...inputStyle, padding: "8px 10px" }} />;
+  const Head = ({ children }) => <span style={{ fontSize: 11, color: C.sub, fontWeight: 600 }}>{children}</span>;
+  const rowLbl = { fontSize: 12.5, color: C.ink, fontWeight: 500 };
+  const section = { marginBottom: 22 };
+  const secTitle = { fontSize: 14, fontWeight: 700, fontFamily: DISPLAY, marginBottom: 4 };
+  const secSub = { fontSize: 12, color: C.sub, marginBottom: 12 };
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: C.amber, fontWeight: 600, marginBottom: 18 }}>
+        These prices are global — editing here updates the pricing shown on every matching client card, and vice-versa.
+      </p>
+
+      {/* Viper subscription */}
+      <div style={section}>
+        <div style={secTitle}>Viper subscription</div>
+        <div style={secSub}>Per-user tiers, monthly and annual-in-advance. Applies to every Viper customer card.</div>
+        <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr 1fr", gap: "8px 10px", alignItems: "center" }}>
+          <Head>Tier</Head><Head>Monthly ($)</Head><Head>Annual ($)</Head>
+          <span style={rowLbl}>1–{vp.tier2Min - 1} users (flat)</span>{num(vp.base, (v) => setVp("base", v))}{num(vp.baseY, (v) => setVp("baseY", v))}
+          <span style={rowLbl}>{vp.tier2Min}–{vp.tier3Min - 1} users (per user)</span>{num(vp.tier2, (v) => setVp("tier2", v))}{num(vp.tier2Y, (v) => setVp("tier2Y", v))}
+          <span style={rowLbl}>{vp.tier3Min}+ users (per user)</span>{num(vp.tier3, (v) => setVp("tier3", v))}{num(vp.tier3Y, (v) => setVp("tier3Y", v))}
+        </div>
+        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "8px 10px", alignItems: "center", marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.lineSoft}` }}>
+          <span style={rowLbl}>Tier 2 starts at (users)</span>{num(vp.tier2Min, (v) => setVp("tier2Min", v))}
+          <span style={rowLbl}>Tier 3 starts at (users)</span>{num(vp.tier3Min, (v) => setVp("tier3Min", v))}
+        </div>
+      </div>
+
+      {/* Maritz portal pricing */}
+      <div style={section}>
+        <div style={secTitle}>Maritz portal pricing</div>
+        <div style={secSub}>Single-office Maritz portal price. Applies to every single-office Maritz card.</div>
+        <div className="grid" style={{ gridTemplateColumns: "1fr 1fr 1fr", gap: "8px 10px", alignItems: "center" }}>
+          <div><Head>Monthly ($)</Head>{num(mp.monthly, (v) => setMp("monthly", v))}</div>
+          <div><Head>Annual ($)</Head>{num(mp.annual, (v) => setMp("annual", v))}</div>
+          <div><Head>One-time setup fee ($)</Head>{num(mp.setupFee, (v) => setMp("setupFee", v))}</div>
+        </div>
+      </div>
+
+      {/* Maritz multi-office (group) pricing */}
+      <div style={{ ...section, marginBottom: 4 }}>
+        <div style={secTitle}>Maritz multi-office pricing</div>
+        <div style={secSub}>Group tiers by office count. Applies to every multi-office group billing card.</div>
+        <div className="grid" style={{ gridTemplateColumns: "1.4fr 1fr 1fr", gap: "8px 10px", alignItems: "center" }}>
+          <Head>Group size</Head><Head>Monthly ($)</Head><Head>Annual ($)</Head>
+          {[["Single office", "t1m", "t1y"], ["2–5 offices", "t2m", "t2y"], ["6–10 offices", "t3m", "t3y"], ["11+ offices", "t4m", "t4y"]].map(([lbl, mk, yk]) => (
+            <React.Fragment key={mk}>
+              <span style={rowLbl}>{lbl}</span>{num(gt[mk], (v) => setGt(mk, v))}{num(gt[yk], (v) => setGt(yk, v))}
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

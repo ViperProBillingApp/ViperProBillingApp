@@ -2733,20 +2733,30 @@ function CredField({ label, value, onChange, placeholder }) {
 // (latest dated list). Each username/password has a click-to-copy cell.
 function MaritzUsers({ client }) {
   const lists = (client.maritzUserLists || []).filter((l) => !l.archived);
+  const [copied, setCopied] = useState("");
+  const [q, setQ] = useState("");
   if (!lists.length) return null;
   const list = lists.slice().sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))[0];
-  const [copied, setCopied] = useState("");
-  const cp = (v, k) => { if (!v) return; navigator.clipboard?.writeText(v).then(() => { setCopied(k); setTimeout(() => setCopied(""), 1200); }); };
-  const cell = (v, k) => (
-    <td onClick={() => cp(v, k)} title={v ? "Click to copy" : ""} style={{ padding: "4px 8px", fontFamily: MONO, cursor: v ? "pointer" : "default", color: copied === k ? C.green : C.ink, borderBottom: `1px solid ${C.lineSoft}`, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{copied === k ? "copied ✓" : (v || "—")}</td>
+  const k = q.trim().toLowerCase();
+  const shown = k ? list.users.filter((u) => u.some((c) => (c || "").toLowerCase().includes(k))) : list.users;
+  const cp = (v, kk) => { if (!v) return; navigator.clipboard?.writeText(v).then(() => { setCopied(kk); setTimeout(() => setCopied(""), 1200); }); };
+  const cell = (v, kk) => (
+    <td onClick={() => cp(v, kk)} title={v ? "Click to copy" : ""} style={{ padding: "4px 8px", fontFamily: MONO, cursor: v ? "pointer" : "default", color: copied === kk ? C.green : C.ink, borderBottom: `1px solid ${C.lineSoft}`, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{copied === kk ? "copied ✓" : (v || "—")}</td>
   );
   return (
     <div style={{ marginTop: 12 }}>
-      <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, marginBottom: 6 }}>Portal users · collected {fmtDate(list.collectedAt)} · {list.users.length}</div>
+      <div className="flex items-center justify-between" style={{ gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 11.5, fontWeight: 600, color: C.sub }}>Portal users · collected {fmtDate(list.collectedAt)} · {k ? `${shown.length}/${list.users.length}` : list.users.length}</span>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search users"
+          style={{ fontSize: 12, padding: "5px 9px", borderRadius: 7, border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 150 }} />
+      </div>
       <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
           <thead><tr style={{ background: C.lineSoft }}>{["Name", "Username", "Password"].map((h) => <th key={h} style={{ textAlign: "left", padding: "5px 8px", color: C.sub, fontWeight: 600 }}>{h}</th>)}</tr></thead>
-          <tbody>{list.users.map((u, i) => <tr key={i}>{cell(u[0], `n${i}`)}{cell(u[1], `u${i}`)}{cell(u[2], `p${i}`)}</tr>)}</tbody>
+          <tbody>
+            {shown.map((u, i) => <tr key={i}>{cell(u[0], `n${i}`)}{cell(u[1], `u${i}`)}{cell(u[2], `p${i}`)}</tr>)}
+            {shown.length === 0 && <tr><td colSpan={3} style={{ padding: "8px", color: C.faint, textAlign: "center" }}>No users match “{q.trim()}”.</td></tr>}
+          </tbody>
         </table>
       </div>
     </div>

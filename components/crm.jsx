@@ -328,6 +328,7 @@ function normalise(r) {
     maritzPortalPassword: r.maritzPortalPassword || "",
     maritzAdminUser: (r.maritzAdminUser || "").trim(),
     maritzAdminPassword: r.maritzAdminPassword || "",
+    maritzUserLists: Array.isArray(r.maritzUserLists) ? r.maritzUserLists : [], // captured Maritz portal users, dated
     formerCustomer: !!r.formerCustomer,
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
@@ -2090,6 +2091,7 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               {client.maritzPortalUrl && <a href={client.maritzPortalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
               {client.maritzAdminUrl && <a href={client.maritzAdminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
             </div>
+            <MaritzUsers client={client} />
           </Section>
 
           {/* Portal user lists — captured employee lists, dated for change-tracking */}
@@ -2725,6 +2727,29 @@ function CredField({ label, value, onChange, placeholder }) {
         </button>
       </div>
     </label>
+  );
+}
+// Read-only table of the Maritz portal users captured from the admin site
+// (latest dated list). Each username/password has a click-to-copy cell.
+function MaritzUsers({ client }) {
+  const lists = (client.maritzUserLists || []).filter((l) => !l.archived);
+  if (!lists.length) return null;
+  const list = lists.slice().sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))[0];
+  const [copied, setCopied] = useState("");
+  const cp = (v, k) => { if (!v) return; navigator.clipboard?.writeText(v).then(() => { setCopied(k); setTimeout(() => setCopied(""), 1200); }); };
+  const cell = (v, k) => (
+    <td onClick={() => cp(v, k)} title={v ? "Click to copy" : ""} style={{ padding: "4px 8px", fontFamily: MONO, cursor: v ? "pointer" : "default", color: copied === k ? C.green : C.ink, borderBottom: `1px solid ${C.lineSoft}`, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{copied === k ? "copied ✓" : (v || "—")}</td>
+  );
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, marginBottom: 6 }}>Portal users · collected {fmtDate(list.collectedAt)} · {list.users.length}</div>
+      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
+          <thead><tr style={{ background: C.lineSoft }}>{["Name", "Username", "Password"].map((h) => <th key={h} style={{ textAlign: "left", padding: "5px 8px", color: C.sub, fontWeight: 600 }}>{h}</th>)}</tr></thead>
+          <tbody>{list.users.map((u, i) => <tr key={i}>{cell(u[0], `n${i}`)}{cell(u[1], `u${i}`)}{cell(u[2], `p${i}`)}</tr>)}</tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };

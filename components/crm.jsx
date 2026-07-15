@@ -1425,6 +1425,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   const [q, setQ] = useState("");
   const [view, setView] = useState("compose"); // compose | sent
   const [sq, setSq] = useState("");
+  const [mailView, setMailView] = useState(null); // {c, mail} — popup of a sent email
   const key = `${type}:${periodKey()}`;
 
   // Every sent email across all clients, newest first — the tab's sent archive.
@@ -1532,7 +1533,6 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
-        <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
         <span style={{ fontSize: 12.5, color: C.sub }}>Audience</span>
         <MiniSelect value={aud} onChange={setAud} options={[
           ["auto", `Suggested: ${audienceHint}`],
@@ -1541,6 +1541,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
           ["grp:viper", "Viper Customers"],
           ["grp:multi", "Multi-office"],
         ]} />
+        <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
           style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
@@ -1570,7 +1571,14 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
                     {sent && <span style={{ color: C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}
                   </div>
                   <div style={{ fontSize: 11, color: sent ? C.green : C.sub, fontWeight: sent ? 600 : 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {sent ? `Email sent · ${fmtDate(sent)}` : behind >= 1 ? `${money(totalOwed(c), c.currency || settings.currency)} · ${behind}p behind` : BILLING[c.billingStatus].label}
+                    {sent ? (
+                      <span role="button" tabIndex={0} title="View the email that was sent"
+                        onClick={(e) => { e.stopPropagation(); setMailView({ c, mail: periodSent(c) }); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setMailView({ c, mail: periodSent(c) }); } }}
+                        style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
+                        Email sent · {fmtDate(sent)}
+                      </span>
+                    ) : behind >= 1 ? `${money(totalOwed(c), c.currency || settings.currency)} · ${behind}p behind` : BILLING[c.billingStatus].label}
                   </div>
                 </button>
               );
@@ -1600,6 +1608,17 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               officeSiblings={client.officeGroup ? clients.filter((o) => o.id !== client.id && o.officeGroup === client.officeGroup) : []} />
           </div>
         </div>
+      )}
+      {mailView && (
+        <Modal title={`${mailView.mail?.label || "Email"} · ${mailView.c.company || mailView.c.name}`} onClose={() => setMailView(null)}>
+          <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginBottom: 10 }}>
+            Sent {fmtDate(mailView.mail?.sentAt)}{mailView.mail?.via === "brevo" ? " · Brevo" : ""} · to {mailView.c.email || "—"}
+          </div>
+          <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{mailView.mail?.subject || "(no subject saved)"}</div>
+            <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{mailView.mail?.body || "(message not saved)"}</div>
+          </div>
+        </Modal>
       )}
     </div>
   );

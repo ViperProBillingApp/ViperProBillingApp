@@ -320,6 +320,14 @@ function normalise(r) {
     adminUrl: (r.adminUrl || "").trim(),
     portalUser: (r.portalUser || "").trim(),
     portalPassword: r.portalPassword || "",
+    adminUser: (r.adminUser || "").trim(),       // Viper admin login
+    adminPassword: r.adminPassword || "",
+    maritzPortalUrl: (r.maritzPortalUrl || "").trim(),   // Maritz portal access
+    maritzAdminUrl: (r.maritzAdminUrl || "").trim(),
+    maritzPortalUser: (r.maritzPortalUser || "").trim(),
+    maritzPortalPassword: r.maritzPortalPassword || "",
+    maritzAdminUser: (r.maritzAdminUser || "").trim(),
+    maritzAdminPassword: r.maritzAdminPassword || "",
     formerCustomer: !!r.formerCustomer,
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
@@ -2040,10 +2048,28 @@ function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, on
               <CredField label="Admin URL" value={client.adminUrl} onChange={(v) => set({ adminUrl: v })} placeholder="https://…" />
               <CredField label="User name" value={client.portalUser} onChange={(v) => set({ portalUser: v })} />
               <CredField label="Password" value={client.portalPassword} onChange={(v) => set({ portalPassword: v })} />
+              <CredField label="Admin user name" value={client.adminUser} onChange={(v) => set({ adminUser: v })} />
+              <CredField label="Admin password" value={client.adminPassword} onChange={(v) => set({ adminPassword: v })} />
             </div>
             <div className="flex" style={{ gap: 8, marginTop: 4 }}>
               {client.portalUrl && <a href={client.portalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
               {client.adminUrl && <a href={client.adminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
+            </div>
+          </Section>
+
+          {/* Maritz portal access — same layout + copy buttons as Viper */}
+          <Section title="Maritz portal access">
+            <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+              <CredField label="Portal URL" value={client.maritzPortalUrl} onChange={(v) => set({ maritzPortalUrl: v })} placeholder="https://…" />
+              <CredField label="Admin URL" value={client.maritzAdminUrl} onChange={(v) => set({ maritzAdminUrl: v })} placeholder="https://…" />
+              <CredField label="User name" value={client.maritzPortalUser} onChange={(v) => set({ maritzPortalUser: v })} />
+              <CredField label="Password" value={client.maritzPortalPassword} onChange={(v) => set({ maritzPortalPassword: v })} />
+              <CredField label="Admin user name" value={client.maritzAdminUser} onChange={(v) => set({ maritzAdminUser: v })} />
+              <CredField label="Admin password" value={client.maritzAdminPassword} onChange={(v) => set({ maritzAdminPassword: v })} />
+            </div>
+            <div className="flex" style={{ gap: 8, marginTop: 4 }}>
+              {client.maritzPortalUrl && <a href={client.maritzPortalUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open portal ↗</a>}
+              {client.maritzAdminUrl && <a href={client.maritzAdminUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12.5, fontWeight: 600, color: C.action }}>Open admin ↗</a>}
             </div>
           </Section>
 

@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 
-const LANES = new Set(["todo", "doing", "done"]);
+const LANES = new Set(["todo", "doing", "waiting", "done"]);
 // Whitelisted columns a PATCH may set — keeps arbitrary keys out of the SQL.
-const FIELDS = { title: "title", lane: "lane", owner: "owner", clientId: "client_id", label: "label", note: "note", due: "due" };
+const FIELDS = { title: "title", lane: "lane", owner: "owner", clientId: "client_id", label: "label", note: "note", due: "due", checklist: "checklist" };
 
 export async function PATCH(req, { params }) {
   const me = await getSessionUser();

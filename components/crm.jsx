@@ -41,8 +41,8 @@ const STAGES = {
 const STAGE_ORDER = Object.keys(STAGES).sort((a, b) => STAGES[a].order - STAGES[b].order);
 // Tasks board (Workflow tab): lanes, category labels, and the account-edit flag
 // that also shows on client cards (mirrors the red/green Maritz-edit workflow).
-const TASK_LANES = [["todo", "To do"], ["doing", "Doing"], ["done", "Done"]];
-const LANE_COLOR = { todo: "#8A94A6", doing: "#3B5BA5", done: C.green };
+const TASK_LANES = [["todo", "To do"], ["doing", "In progress"], ["waiting", "Waiting on"], ["done", "Done"]];
+const LANE_COLOR = { todo: "#8A94A6", doing: "#3B5BA5", waiting: C.amber, done: C.green };
 const TASK_LABELS = {
   campaign: { label: "Campaign", fg: C.action, bg: "#E7EDF8" },
   data: { label: "Data ops", fg: "#6D5BA6", bg: "#EEEBF7" },
@@ -608,6 +608,7 @@ export default function CRM({ user }) {
         <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
         <MenuItem icon="pricing" onClick={() => setModal("pricing")}>Pricing</MenuItem>
         <MenuItem icon="portal" onClick={() => setModal("viper")}>Viper Customers</MenuItem>
+        <MenuItem icon="reports" onClick={() => setModal("reports")}>Reports</MenuItem>
         <MenuItem icon="onboarding" onClick={() => setModal("onboarding")}>Maritz Onboarding</MenuItem>
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
@@ -645,7 +646,7 @@ export default function CRM({ user }) {
               display so the right-alignment holds even if the .flex utility
               class isn't emitted by the CSS build. */}
           <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
-            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"], ["reports", "Reports"]].map(([k, t]) => (
+            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
               <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
@@ -668,7 +669,6 @@ export default function CRM({ user }) {
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
-            {tab === "reports" && <ReportsTab clients={active} settings={settings} onOpen={setDetailId} />}
           </>
         )}
 
@@ -696,6 +696,7 @@ export default function CRM({ user }) {
       {modal === "onboarding" && <Modal wide title="Maritz Onboarding — adding a new office" onClose={() => setModal(null)}><MaritzOnboarding /></Modal>}
       {modal === "pricing" && <Modal wide title="Pricing" onClose={() => setModal(null)}><PricingPanel settings={settings} onSave={setSettings} /></Modal>}
       {modal === "viper" && <Modal wide title="Viper Customers — portal logins" onClose={() => setModal(null)}><ViperCustomers clients={clients} onSync={(id, patch) => updateWithLog(id, patch, "portal", "Viper portal login updated from Viper Customers")} /></Modal>}
+      {modal === "reports" && <Modal wide title="Reports" onClose={() => setModal(null)}><ReportsTab clients={active} settings={settings} onOpen={(id) => { setModal(null); setDetailId(id); }} /></Modal>}
       {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
@@ -720,6 +721,7 @@ function MenuIcon({ name, color }) {
     case "onboarding": return <svg {...p}><path d="M9 2h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2V3a1 1 0 0 1 1-1z" /><path d="M9 12l2 2 4-4" /></svg>;
     case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill={color} stroke="none" /></svg>;
     case "portal": return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M7 6.5h.01" /><path d="M8 14h5" /></svg>;
+    case "reports": return <svg {...p}><path d="M3 21h18" /><path d="M6 21V11M11 21V4M16 21v-7M21 21V8" /></svg>;
     default: return null;
   }
 }
@@ -1445,9 +1447,13 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
   const staffByEmail = useMemo(() => Object.fromEntries(staff.map((s) => [s.email, s.name || s.email])), [staff]);
   const taskCount = useMemo(() => { const m = {}; for (const t of tasks) if (t.client_id && t.lane !== "done") m[t.client_id] = (m[t.client_id] || 0) + 1; return m; }, [tasks]);
 
+  // "My cards": owner emails can differ in case from the login email
+  // (mixed-case rows exist — see users_email_lower_idx), so compare lowercased.
+  const isMine = (o) => (o || "").trim().toLowerCase() === (user.email || "").trim().toLowerCase();
+
   const hiddenCount = clients.filter((c) => c.workflowHidden).length;
   let visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
-  if (mine) visible = visible.filter((c) => c.owner === user.email);
+  if (mine) visible = visible.filter((c) => isMine(c.owner));
 
   const drop = (e, stage) => {
     e.preventDefault();
@@ -1456,27 +1462,31 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
     if (id) onStage(id, stage);
   };
   const segBtn = (key, label) => (
-    <button onClick={() => setBoard(key)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: board === key ? C.brand : "transparent", color: board === key ? C.brandInk : C.sub, cursor: "pointer" }}>{label}</button>
+    <button onClick={() => setBoard(key)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: board === key ? "#fff" : "transparent", color: board === key ? C.ink : "rgba(255,255,255,0.85)", cursor: "pointer" }}>{label}</button>
   );
 
   return (
-    <div>
+    // Trello-style board backdrop: deep blue gradient behind both boards.
+    <div style={{ background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderRadius: 14, padding: "14px 14px 18px", margin: "0 -4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={{ display: "inline-flex", border: `1px solid ${C.line}`, borderRadius: 9, overflow: "hidden" }}>
+        <div style={{ display: "inline-flex", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
           {segBtn("stages", "Client stages")}
           {segBtn("tasks", "Tasks")}
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "rgba(255,255,255,0.88)", fontWeight: 600, cursor: "pointer" }}>
           <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My cards
         </label>
+        {mine && !visible.length && board === "stages" && (
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>No cards assigned to you — set yourself as Owner on a client card (Info tab).</span>
+        )}
       </div>
 
       {board === "tasks" ? (
-        <TasksBoard tasks={tasks} setTasks={setTasks} staff={staff} staffByEmail={staffByEmail} clients={allClients} user={user} onOpen={onOpen} mine={mine} />
+        <TasksBoard tasks={tasks} setTasks={setTasks} staff={staff} staffByEmail={staffByEmail} clients={allClients} user={user} onOpen={onOpen} mine={mine} isMine={isMine} />
       ) : (
       <>
       {(hiddenCount > 0 || showHidden) && (
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginBottom: 12, width: "fit-content" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "rgba(255,255,255,0.85)", cursor: "pointer", marginBottom: 12, width: "fit-content" }}>
           <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
           {showHidden ? `Showing ${hiddenCount} removed from workflow` : `${hiddenCount} removed from workflow — show`}
         </label>
@@ -1551,13 +1561,13 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
 
 /* Tasks board — free-form project/campaign cards in To do / Doing / Done lanes,
    each optionally owned, labelled, dated, and linked to a client. */
-function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpen, mine }) {
+function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpen, mine, isMine }) {
   const [dragOver, setDragOver] = useState(null);
   const [editing, setEditing] = useState(null);
   const [addingLane, setAddingLane] = useState(null);
   const [draft, setDraft] = useState("");
   const clientById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
-  const shown = mine ? tasks.filter((t) => t.owner === user.email) : tasks;
+  const shown = mine ? tasks.filter((t) => isMine(t.owner)) : tasks;
 
   const api = async (url, method, body) => {
     const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
@@ -1583,7 +1593,7 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
 
   return (
     <>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12, alignItems: "start" }}>
         {TASK_LANES.map(([lane, label]) => {
           const col = shown.filter((t) => t.lane === lane);
           return (
@@ -1599,8 +1609,8 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
               </div>
               <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
                 {col.map((t) => (
-                  <TaskCard key={t.id} task={t} client={clientById[t.client_id]} staffByEmail={staffByEmail}
-                    onOpen={() => setEditing(t)} onClient={onOpen}
+                  <TaskCard key={t.id} task={t} client={clientById[t.client_id]} staff={staff} staffByEmail={staffByEmail}
+                    onOpen={() => setEditing(t)} onClient={onOpen} onAssign={(owner) => save(t.id, { owner })}
                     onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)} />
                 ))}
                 {addingLane === lane ? (
@@ -1628,12 +1638,17 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
   );
 }
 
-function TaskCard({ task, client, staffByEmail, onOpen, onClient, onDragStart }) {
+const parseChecklist = (s) => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
+
+function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssign, onDragStart }) {
+  const [assignOpen, setAssignOpen] = useState(false);
   const lbl = TASK_LABELS[task.label];
   const overdue = task.due && task.lane !== "done" && new Date(task.due) < new Date(new Date().toDateString());
+  const cl = parseChecklist(task.checklist);
+  const clDone = cl.filter(([, d]) => d).length;
   return (
     <div draggable onDragStart={onDragStart} onClick={onOpen}
-      style={{ background: C.paper, borderRadius: 8, border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
+      style={{ position: "relative", background: C.paper, borderRadius: 8, border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
       {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: 20, background: lbl.bg, color: lbl.fg }}>{lbl.label}</span>}
       <div style={{ fontSize: 12.5, marginTop: lbl ? 5 : 0, color: C.ink, lineHeight: 1.3, opacity: task.lane === "done" ? 0.6 : 1, textDecoration: task.lane === "done" ? "line-through" : "none" }}>{task.title}</div>
       {task.note && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 3, lineHeight: 1.3 }}>{task.note}</div>}
@@ -1644,10 +1659,36 @@ function TaskCard({ task, client, staffByEmail, onOpen, onClient, onDragStart })
             {client.company || client.name}
           </button>
         )}
+        {cl.length > 0 && (
+          <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 6, background: clDone === cl.length ? C.greenBg : C.lineSoft, color: clDone === cl.length ? C.green : C.sub }}>
+            ☑ {clDone}/{cl.length}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         {task.due && <span style={{ fontSize: 10, color: overdue ? C.red : C.faint }}>{fmtDate(task.due)}</span>}
-        {task.owner && <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />}
+        {/* Assign directly from the card — Trello-style member button */}
+        <button onClick={(e) => { e.stopPropagation(); setAssignOpen((o) => !o); }} title={task.owner ? `Assigned: ${staffByEmail[task.owner] || task.owner} — click to change` : "Assign to…"}
+          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}>
+          {task.owner
+            ? <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />
+            : <span style={{ width: 18, height: 18, borderRadius: 18, border: `1.5px dashed ${C.faint}`, color: C.faint, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>+</span>}
+        </button>
       </div>
+      {assignOpen && (
+        <>
+          <div onClick={(e) => { e.stopPropagation(); setAssignOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", right: 6, top: "100%", marginTop: -4, zIndex: 21, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
+            {staff.map((s) => (
+              <button key={s.email} onClick={() => { onAssign(s.email); setAssignOpen(false); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: task.owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
+                <Avatar email={s.email} staffByEmail={staffByEmail} size={18} />{s.name || s.email}
+              </button>
+            ))}
+            {task.owner && <button onClick={() => { onAssign(""); setAssignOpen(false); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: "none", border: "none", borderTop: `1px solid ${C.lineSoft}`, cursor: "pointer", color: C.sub }}>Unassign</button>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1659,7 +1700,10 @@ function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
   const [label, setLabel] = useState(task.label || "");
   const [due, setDue] = useState(task.due || "");
   const [clientId, setClientId] = useState(task.client_id || "");
+  const [checklist, setChecklist] = useState(parseChecklist(task.checklist));
+  const [newItem, setNewItem] = useState("");
   const [confirmDel, setConfirmDel] = useState(false);
+  const addItem = () => { const t = newItem.trim(); if (!t) return; setChecklist((c) => [...c, [t, false]]); setNewItem(""); };
   return (
     <Modal title="Task" onClose={onClose}>
       <Field label="Title"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
@@ -1680,6 +1724,21 @@ function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
         <Field label="Due date"><input type="date" style={inputStyle} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
         <Field label="Linked client"><ClientPicker clients={clients} value={clientId} onChange={setClientId} /></Field>
       </div>
+      <Field label={`Checklist${checklist.length ? ` · ${checklist.filter(([, d]) => d).length}/${checklist.length}` : ""}`}>
+        {checklist.map(([text, done], i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 0" }}>
+            <input type="checkbox" checked={!!done} onChange={() => setChecklist((c) => c.map((it, j) => (j === i ? [it[0], !it[1]] : it)))} style={{ cursor: "pointer" }} />
+            <span style={{ flex: 1, fontSize: 13, color: done ? C.faint : C.ink, textDecoration: done ? "line-through" : "none" }}>{text}</span>
+            <button onClick={() => setChecklist((c) => c.filter((_, j) => j !== i))} title="Remove item"
+              style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 6, marginTop: checklist.length ? 6 : 0 }}>
+          <input style={{ ...inputStyle, fontSize: 13 }} value={newItem} onChange={(e) => setNewItem(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addItem(); } }} placeholder="Add an item — Enter" />
+          <MiniBtn onClick={addItem}>Add</MiniBtn>
+        </div>
+      </Field>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
         {confirmDel ? (
           <>
@@ -1692,7 +1751,7 @@ function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
         )}
         <span style={{ flex: 1 }} />
         <GhostBtn onClick={onClose}>Cancel</GhostBtn>
-        <SolidBtn onClick={() => title.trim() && onSave({ title: title.trim(), note, owner, label, due, clientId })}>Save</SolidBtn>
+        <SolidBtn onClick={() => title.trim() && onSave({ title: title.trim(), note, owner, label, due, clientId, checklist: JSON.stringify(checklist) })}>Save</SolidBtn>
       </div>
     </Modal>
   );

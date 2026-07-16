@@ -3,7 +3,7 @@ import { getDb } from "../../../lib/db.js";
 import { getSessionUser } from "../../../lib/auth.js";
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
-const LANES = new Set(["todo", "doing", "done"]);
+const LANES = new Set(["todo", "doing", "waiting", "done"]);
 
 export async function GET() {
   const me = await getSessionUser();

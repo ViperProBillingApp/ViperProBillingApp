@@ -6,6 +6,38 @@ not blackbox probing — the live app holds real client PII and plaintext
 third-party passwords, so authenticated testing against production was out of
 scope by the audit's own rules.
 
+> **The body below is the original point-in-time assessment. Most findings have
+> since been remediated — see the Remediation log immediately after this. The
+> executive scores and roadmap are as first written; read them alongside the log.**
+
+## Remediation log (updated 2026-07-16)
+
+Two batches shipped after this audit. Status per finding:
+
+| ID | Finding | Severity | Status |
+| --- | --- | --- | --- |
+| F-01 | Plaintext credential store | Critical | **Open** — top remaining risk; pairs with F-08 Phase 2 |
+| F-02 | No MFA | High | **Fixed** — TOTP (`lib/totp.js`), enroll/login/disable, verified live |
+| F-03 | No immutable audit trail | High | **Fixed** — append-only `audit_log`, admin viewer |
+| F-04 | No automated backup | High | **Fixed** — nightly `state_backups` ring in the cron (restore still to be drilled) |
+| F-05 | No login rate-limiting | Medium | **Fixed** — DB-backed throttle on login + reset |
+| F-06 | No security headers / CSP | Medium | **Fixed** — CSP/HSTS/X-Frame etc., confirmed in prod |
+| F-07 | Long sessions, no idle timeout | Medium | **Fixed** — 3-day idle, 30-day absolute cap |
+| F-08 | Whole-state-blob architecture | Medium | **Phase 2 done** — write-side cutover: frontend saves per-client diffs to `/api/clients/batch`, server merges into current state (whole-array overwrite no longer possible). Blob still maintained as rollback net; read-side cutover + blob retirement is Phase 3 |
+| F-09 | CSV formula injection | Low-Med | **Fixed** — `csvSafe` on both export paths |
+| F-10 | `/api/recover` unthrottled | Low-Med | **Fixed** — 30/user/hour |
+| F-11 | Webhook secret via query param | Low | **Fixed** — header only |
+| F-12 | DB TLS not verified | Low | **Open** — `rejectUnauthorized:false` unchanged |
+| F-13 | False "not plaintext" comment | Low | **Fixed** |
+| F-14 | Expired tokens never GC'd | Obs | **Fixed** — GC in the daily cron |
+| F-15 | No robots.txt | Obs | **Fixed** — `public/robots.txt` |
+
+Net: the dominant risk theme has shifted. Of the "five greatest risks" below,
+audit-trail, backup, and single-factor auth are addressed; the plaintext
+credential concentration (F-01) and the browser-side blob exposure (F-08, until
+cutover) remain. **F-01 is now the single highest open risk** and is the right
+next piece of work.
+
 ## 0. Scope correction (read this first)
 
 The audit brief is written for a **multi-tenant SaaS product that sells

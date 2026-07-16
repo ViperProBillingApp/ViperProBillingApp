@@ -340,6 +340,15 @@ export default function CRM({ user }) {
   // Server-state revision this tab last loaded or saved. Saves send it; the
   // API rejects a save carrying an older rev so this tab can't wipe newer data.
   const revRef = React.useRef(0);
+  // F-08 Phase 2: last-persisted snapshot for per-client diff saves. Maps
+  // client id -> JSON.stringify(client); the save effect sends only clients that
+  // differ, plus ids that vanished. settingsBaseRef holds the settings snapshot.
+  const baselineRef = React.useRef(new Map());
+  const settingsBaseRef = React.useRef("");
+  const setBaseline = useCallback((cs, st) => {
+    baselineRef.current = new Map((cs || []).map((c) => [c.id, JSON.stringify(c)]));
+    settingsBaseRef.current = JSON.stringify(st || {});
+  }, []);
 
   // Signed-in user's signature image — shown in the compose editors; the send
   // route appends it server-side to every outgoing email.
@@ -375,13 +384,21 @@ export default function CRM({ user }) {
         const r = await fetch("/api/state");
         if (r.status === 401) { window.location.href = "/login"; return; }
         const d = await r.json();
-        if (Array.isArray(d.clients)) setClients(d.clients.map(normalise));
-        if (d.settings) setSettings((s) => ({
-          ...s, ...d.settings,
-          viperPricing: { ...s.viperPricing, ...(d.settings.viperPricing || {}) },
-          maritzPricing: { ...s.maritzPricing, ...(d.settings.maritzPricing || {}) },
-          maritzGroupTiers: { ...GROUP_TIER_DEFAULTS, ...(d.settings.maritzGroupTiers || {}) },
-        }));
+        const loadedClients = Array.isArray(d.clients) ? d.clients.map(normalise) : [];
+        if (Array.isArray(d.clients)) setClients(loadedClients);
+        // Baseline the diff-save against exactly what we loaded, so the first
+        // save only sends genuine edits — not the whole set.
+        baselineRef.current = new Map(loadedClients.map((c) => [c.id, JSON.stringify(c)]));
+        if (d.settings) setSettings((s) => {
+          const merged = {
+            ...s, ...d.settings,
+            viperPricing: { ...s.viperPricing, ...(d.settings.viperPricing || {}) },
+            maritzPricing: { ...s.maritzPricing, ...(d.settings.maritzPricing || {}) },
+            maritzGroupTiers: { ...GROUP_TIER_DEFAULTS, ...(d.settings.maritzGroupTiers || {}) },
+          };
+          settingsBaseRef.current = JSON.stringify(merged); // baseline settings where the merged value exists
+          return merged;
+        });
         revRef.current = d.rev || 0;
       } catch (e) { /* first run / offline — start empty */ }
       finally { setLoaded(true); }
@@ -432,21 +449,37 @@ export default function CRM({ user }) {
     });
   }, [loaded]);
 
+  // F-08 Phase 2: diff-based save. Send only clients that changed since the last
+  // persisted snapshot, plus ids that vanished — never the whole array. The
+  // server merges the diff into current state, so a stale tab physically cannot
+  // wipe clients it didn't touch (the two historical data-loss incidents).
   useEffect(() => {
     if (!loaded) return;
     if (saveState === "stale") return; // out-of-date tab must never overwrite newer server data
     setSaveState("saving");
     const t = setTimeout(async () => {
+      const base = baselineRef.current;
+      const curIds = new Set(clients.map((c) => c.id));
+      const upserts = clients.filter((c) => base.get(c.id) !== JSON.stringify(c)); // new or changed
+      const deletes = [...base.keys()].filter((id) => !curIds.has(id));
+      const settingsStr = JSON.stringify(settings);
+      const settingsChanged = settingsStr !== settingsBaseRef.current;
+      if (!upserts.length && !deletes.length && !settingsChanged) { setSaveState("saved"); return; }
       try {
-        const r = await fetch("/api/state", {
+        const r = await fetch("/api/clients/batch", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ clients, settings, rev: revRef.current }),
+          body: JSON.stringify({ upserts, deletes, settings: settingsChanged ? settings : undefined, rev: revRef.current }),
         });
         if (r.status === 401) { window.location.href = "/login"; return; }
         if (r.status === 409) { setSaveState("stale"); return; }
         const d = await r.json().catch(() => ({}));
-        if (r.ok && d.rev) revRef.current = d.rev;
+        if (r.ok && d.rev) {
+          revRef.current = d.rev;
+          // Advance the baseline only on confirmed success, so a failed save re-sends.
+          baselineRef.current = new Map(clients.map((c) => [c.id, JSON.stringify(c)]));
+          settingsBaseRef.current = settingsStr;
+        }
         setSaveState(r.ok ? "saved" : "error");
       } catch { setSaveState("error"); }
     }, 600);
@@ -517,8 +550,10 @@ export default function CRM({ user }) {
       if (!r.ok) { setSync({ busy: false, msg: d.error || "Sync failed." }); return; }
       const sr = await fetch("/api/state");
       const sd = await sr.json();
-      if (Array.isArray(sd.clients)) setClients(sd.clients.map(normalise));
+      const synced = Array.isArray(sd.clients) ? sd.clients.map(normalise) : [];
+      if (Array.isArray(sd.clients)) setClients(synced);
       revRef.current = sd.rev || 0; // sync bumped the rev; adopt it so saves keep flowing
+      baselineRef.current = new Map(synced.map((c) => [c.id, JSON.stringify(c)])); // re-baseline against synced data
       setSync({ busy: false, msg: `ChargeOver synced: ${d.added} added, ${d.updated} updated (${d.customers} customers).` });
     } catch {
       setSync({ busy: false, msg: "Sync failed — try again." });

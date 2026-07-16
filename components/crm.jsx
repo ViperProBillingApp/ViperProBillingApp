@@ -39,6 +39,36 @@ const STAGES = {
   "marked-deletion": { label: "Marked for deletion", color: C.red, order: 5 },
 };
 const STAGE_ORDER = Object.keys(STAGES).sort((a, b) => STAGES[a].order - STAGES[b].order);
+// Tasks board (Workflow tab): lanes, category labels, and the account-edit flag
+// that also shows on client cards (mirrors the red/green Maritz-edit workflow).
+const TASK_LANES = [["todo", "To do"], ["doing", "Doing"], ["done", "Done"]];
+const LANE_COLOR = { todo: "#8A94A6", doing: "#3B5BA5", done: C.green };
+const TASK_LABELS = {
+  campaign: { label: "Campaign", fg: C.action, bg: "#E7EDF8" },
+  data: { label: "Data ops", fg: "#6D5BA6", bg: "#EEEBF7" },
+  outreach: { label: "Custom outreach", fg: C.amber, bg: C.amberBg },
+  onboarding: { label: "Onboarding", fg: C.green, bg: C.greenBg },
+};
+const CLIENT_FLAGS = {
+  approved: { label: "Approved", fg: C.green, bg: C.greenBg },
+  edit: { label: "Needs edit", fg: C.amber, bg: C.amberBg },
+  remove: { label: "Remove", fg: C.red, bg: C.redBg },
+};
+const initialsOf = (s) => {
+  const t = (s || "").trim();
+  if (!t) return "?";
+  const p = t.split(/[\s@.]+/).filter(Boolean);
+  return ((p[0]?.[0] || "") + (p[1]?.[0] || "")).toUpperCase() || t.slice(0, 2).toUpperCase();
+};
+function Avatar({ email, staffByEmail = {}, size = 20 }) {
+  if (!email) return null;
+  const name = staffByEmail[email] || email;
+  return (
+    <span title={name} style={{ width: size, height: size, borderRadius: "50%", background: "#E7EDF8", color: C.action, fontSize: size * 0.5, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      {initialsOf(name)}
+    </span>
+  );
+}
 const TAGS = {
   "needs-contact-info": { label: "Needs new contact info", color: C.amber },
   "email-bouncing": { label: "Email bouncing", color: C.red },
@@ -280,6 +310,8 @@ function normalise(r) {
       : ((r.notes || "").trim() ? [{ id: uid(), at: r.createdAt || iso(), by: "", text: r.notes.trim() }] : []),
     notes: "",
     followUp: r.followUp || "",
+    owner: (r.owner || "").trim(), // assigned staff (email) — shown on workflow cards
+    flag: CLIENT_FLAGS[r.flag] ? r.flag : "", // account-edit flag (approved/edit/remove)
     activity: Array.isArray(r.activity) ? r.activity : [],
     createdAt: r.createdAt || iso(),
     archivedClient: !!r.archivedClient,
@@ -631,7 +663,7 @@ export default function CRM({ user }) {
           <>
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {/* Archived former customers still surface on the board while marked for deletion */}
-            {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
+            {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
@@ -1396,13 +1428,23 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
 }
 
 /* --------------------------- Workflow tab --------------------------- */
-function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
+function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
+  const [board, setBoard] = useState("stages"); // stages | tasks
+  const [mine, setMine] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [dragOverStage, setDragOverStage] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [staff, setStaff] = useState([]);
+  useEffect(() => {
+    fetch("/api/tasks").then((r) => r.json()).then((d) => setTasks(d.tasks || [])).catch(() => {});
+    fetch("/api/staff").then((r) => r.json()).then((d) => setStaff(d.staff || [])).catch(() => {});
+  }, []);
+  const staffByEmail = useMemo(() => Object.fromEntries(staff.map((s) => [s.email, s.name || s.email])), [staff]);
+  const taskCount = useMemo(() => { const m = {}; for (const t of tasks) if (t.client_id && t.lane !== "done") m[t.client_id] = (m[t.client_id] || 0) + 1; return m; }, [tasks]);
+
   const hiddenCount = clients.filter((c) => c.workflowHidden).length;
-  // Offices covered by a group are represented by the group's master card only —
-  // don't show a separate workflow card for each office.
-  const visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
+  let visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
+  if (mine) visible = visible.filter((c) => c.owner === user.email);
 
   const drop = (e, stage) => {
     e.preventDefault();
@@ -1410,16 +1452,33 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
     const id = e.dataTransfer.getData("text/plain");
     if (id) onStage(id, stage);
   };
+  const segBtn = (key, label) => (
+    <button onClick={() => setBoard(key)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: board === key ? C.brand : "transparent", color: board === key ? C.brandInk : C.sub, cursor: "pointer" }}>{label}</button>
+  );
 
   return (
     <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", border: `1px solid ${C.line}`, borderRadius: 9, overflow: "hidden" }}>
+          {segBtn("stages", "Client stages")}
+          {segBtn("tasks", "Tasks")}
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer" }}>
+          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My cards
+        </label>
+      </div>
+
+      {board === "tasks" ? (
+        <TasksBoard tasks={tasks} setTasks={setTasks} staff={staff} staffByEmail={staffByEmail} clients={allClients} user={user} onOpen={onOpen} mine={mine} />
+      ) : (
+      <>
       {(hiddenCount > 0 || showHidden) && (
-        <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginBottom: 12, width: "fit-content" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginBottom: 12, width: "fit-content" }}>
           <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
           {showHidden ? `Showing ${hiddenCount} removed from workflow` : `${hiddenCount} removed from workflow — show`}
         </label>
       )}
-      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, alignItems: "start" }}>
         {/* "Up to date" cards leave the board automatically, so no column for it —
             EXCEPT in the removed-from-workflow view, where most hidden cards live */}
         {STAGE_ORDER.filter((s) => showHidden || s !== "up-to-date").map((stage) => {
@@ -1448,7 +1507,10 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
                       {showHidden ? "↺" : "✕"}
                     </button>
                     <button onClick={() => onOpen(c.id)} style={{ background: "none", border: "none", padding: 0, paddingRight: 16, cursor: "pointer", textAlign: "left", width: "100%" }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</span>
+                        {c.flag && <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 20, background: CLIENT_FLAGS[c.flag].bg, color: CLIENT_FLAGS[c.flag].fg }}>{CLIENT_FLAGS[c.flag].label}</span>}
+                      </div>
                       <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{arrearsPeriods(c) ? ` · ${arrearsPeriods(c)}p behind` : ""}</div>
                       {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
                       {c.stage === "contacted-awaiting" && (() => {
@@ -1456,6 +1518,13 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
                         const left = t ? Math.max(0, 10 - Math.floor((Date.now() - t) / 86400000)) : 10;
                         return <div style={{ fontSize: 10.5, color: left <= 2 ? C.amber : C.faint, marginTop: 2 }}>Contacted {fmtDate(c.stageAt || c.createdAt)} · returns to Need to contact in {left}d</div>;
                       })()}
+                      {(c.owner || taskCount[c.id]) && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+                          {taskCount[c.id] > 0 && <span style={{ fontSize: 10.5, color: C.sub }}>{taskCount[c.id]} task{taskCount[c.id] > 1 ? "s" : ""}</span>}
+                          <span style={{ flex: 1 }} />
+                          {c.owner && <Avatar email={c.owner} staffByEmail={staffByEmail} size={18} />}
+                        </div>
+                      )}
                     </button>
                     {!showHidden && (
                       <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
@@ -1471,6 +1540,190 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
           );
         })}
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+/* Tasks board — free-form project/campaign cards in To do / Doing / Done lanes,
+   each optionally owned, labelled, dated, and linked to a client. */
+function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpen, mine }) {
+  const [dragOver, setDragOver] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [addingLane, setAddingLane] = useState(null);
+  const [draft, setDraft] = useState("");
+  const clientById = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
+  const shown = mine ? tasks.filter((t) => t.owner === user.email) : tasks;
+
+  const api = async (url, method, body) => {
+    const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+    return r.ok ? r.json().catch(() => null) : null;
+  };
+  const create = async (lane) => {
+    const title = draft.trim();
+    setAddingLane(null); setDraft("");
+    if (!title) return;
+    const d = await api("/api/tasks", "POST", { title, lane, owner: user.email });
+    if (d?.task) setTasks((t) => [d.task, ...t]);
+  };
+  const save = async (id, body) => {
+    const d = await api(`/api/tasks/${id}`, "PATCH", body);
+    if (d?.task) setTasks((t) => t.map((x) => (x.id === id ? d.task : x)));
+  };
+  const move = async (id, lane) => {
+    setTasks((t) => t.map((x) => (x.id === id ? { ...x, lane } : x))); // optimistic
+    save(id, { lane });
+  };
+  const del = async (id) => { setTasks((t) => t.filter((x) => x.id !== id)); setEditing(null); await api(`/api/tasks/${id}`, "DELETE"); };
+  const drop = (e, lane) => { e.preventDefault(); setDragOver(null); const id = e.dataTransfer.getData("text/plain"); if (id) move(id, lane); };
+
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, alignItems: "start" }}>
+        {TASK_LANES.map(([lane, label]) => {
+          const col = shown.filter((t) => t.lane === lane);
+          return (
+            <div key={lane}
+              onDragOver={(e) => { e.preventDefault(); if (dragOver !== lane) setDragOver(lane); }}
+              onDragLeave={() => setDragOver((s) => (s === lane ? null : s))}
+              onDrop={(e) => drop(e, lane)}
+              style={{ background: C.panel, borderRadius: 12, border: `1px solid ${dragOver === lane ? C.action : C.line}`, overflow: "hidden" }}>
+              <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 8, height: 8, borderRadius: 8, background: LANE_COLOR[lane] }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700 }}>{label}</span>
+                <span style={{ fontSize: 11, color: C.faint, marginLeft: "auto", fontFamily: MONO }}>{col.length}</span>
+              </div>
+              <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
+                {col.map((t) => (
+                  <TaskCard key={t.id} task={t} client={clientById[t.client_id]} staffByEmail={staffByEmail}
+                    onOpen={() => setEditing(t)} onClient={onOpen}
+                    onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)} />
+                ))}
+                {addingLane === lane ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <textarea autoFocus rows={2} value={draft} onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); create(lane); } if (e.key === "Escape") { setAddingLane(null); setDraft(""); } }}
+                      placeholder="Task title — Enter to add" style={{ ...inputStyle, fontSize: 12.5, resize: "vertical" }} />
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <MiniBtn solid onClick={() => create(lane)}>Add</MiniBtn>
+                      <MiniBtn onClick={() => { setAddingLane(null); setDraft(""); }}>Cancel</MiniBtn>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddingLane(lane); setDraft(""); }}
+                    style={{ background: "none", border: "none", textAlign: "left", fontSize: 12, color: C.faint, cursor: "pointer", padding: "4px 2px" }}>+ Add a card</button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {editing && <TaskModal task={editing} staff={staff} clients={clients} onClose={() => setEditing(null)}
+        onSave={(body) => { save(editing.id, body); setEditing(null); }} onDelete={() => del(editing.id)} />}
+    </>
+  );
+}
+
+function TaskCard({ task, client, staffByEmail, onOpen, onClient, onDragStart }) {
+  const lbl = TASK_LABELS[task.label];
+  const overdue = task.due && task.lane !== "done" && new Date(task.due) < new Date(new Date().toDateString());
+  return (
+    <div draggable onDragStart={onDragStart} onClick={onOpen}
+      style={{ background: C.paper, borderRadius: 8, border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
+      {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: 20, background: lbl.bg, color: lbl.fg }}>{lbl.label}</span>}
+      <div style={{ fontSize: 12.5, marginTop: lbl ? 5 : 0, color: C.ink, lineHeight: 1.3, opacity: task.lane === "done" ? 0.6 : 1, textDecoration: task.lane === "done" ? "line-through" : "none" }}>{task.title}</div>
+      {task.note && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 3, lineHeight: 1.3 }}>{task.note}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7 }}>
+        {client && (
+          <button onClick={(e) => { e.stopPropagation(); onClient(client.id); }} title="Open client"
+            style={{ fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 6, background: "#E7EDF8", color: C.action, border: "none", cursor: "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {client.company || client.name}
+          </button>
+        )}
+        <span style={{ flex: 1 }} />
+        {task.due && <span style={{ fontSize: 10, color: overdue ? C.red : C.faint }}>{fmtDate(task.due)}</span>}
+        {task.owner && <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />}
+      </div>
+    </div>
+  );
+}
+
+function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
+  const [title, setTitle] = useState(task.title);
+  const [note, setNote] = useState(task.note || "");
+  const [owner, setOwner] = useState(task.owner || "");
+  const [label, setLabel] = useState(task.label || "");
+  const [due, setDue] = useState(task.due || "");
+  const [clientId, setClientId] = useState(task.client_id || "");
+  const [confirmDel, setConfirmDel] = useState(false);
+  return (
+    <Modal title="Task" onClose={onClose}>
+      <Field label="Title"><input style={inputStyle} value={title} onChange={(e) => setTitle(e.target.value)} /></Field>
+      <Field label="Note"><textarea rows={2} style={{ ...inputStyle, resize: "vertical" }} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional detail — contact, next step…" /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field label="Owner">
+          <select style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)}>
+            <option value="">Unassigned</option>
+            {staff.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+          </select>
+        </Field>
+        <Field label="Label">
+          <select style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)}>
+            <option value="">None</option>
+            {Object.entries(TASK_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Due date"><input type="date" style={inputStyle} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
+        <Field label="Linked client"><ClientPicker clients={clients} value={clientId} onChange={setClientId} /></Field>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+        {confirmDel ? (
+          <>
+            <span style={{ fontSize: 12, color: C.red }}>Delete this task?</span>
+            <button onClick={onDelete} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "none", background: C.red, color: "#fff", cursor: "pointer" }}>Delete</button>
+            <button onClick={() => setConfirmDel(false)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
+          </>
+        ) : (
+          <button onClick={() => setConfirmDel(true)} style={{ fontSize: 12.5, fontWeight: 600, color: C.red, background: "none", border: "none", cursor: "pointer" }}>Delete task</button>
+        )}
+        <span style={{ flex: 1 }} />
+        <GhostBtn onClick={onClose}>Cancel</GhostBtn>
+        <SolidBtn onClick={() => title.trim() && onSave({ title: title.trim(), note, owner, label, due, clientId })}>Save</SolidBtn>
+      </div>
+    </Modal>
+  );
+}
+
+// Type-ahead picker for linking a task to a client (there are hundreds).
+function ClientPicker({ clients, value, onChange }) {
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const selected = clients.find((c) => c.id === value);
+  const matches = q.trim() ? clients.filter((c) => (c.company || c.name || "").toLowerCase().includes(q.toLowerCase())).slice(0, 8) : [];
+  if (selected && !open) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 38 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 600, padding: "3px 8px", borderRadius: 6, background: "#E7EDF8", color: C.action, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.company || selected.name}</span>
+        <button onClick={() => onChange("")} title="Unlink" style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13 }}>✕</button>
+        <button onClick={() => setOpen(true)} style={{ background: "none", border: "none", color: C.action, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>change</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ position: "relative" }}>
+      <input style={inputStyle} value={q} autoFocus={open} onChange={(e) => { setQ(e.target.value); setOpen(true); }} placeholder="Search clients…" />
+      {open && matches.length > 0 && (
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginTop: 4, zIndex: 5, overflow: "hidden", boxShadow: "0 8px 24px rgba(34,48,76,0.14)" }}>
+          {matches.map((c) => (
+            <button key={c.id} onClick={() => { onChange(c.id); setQ(""); setOpen(false); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 11px", fontSize: 12.5, background: "none", border: "none", cursor: "pointer", color: C.ink }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              {c.company || c.name}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1867,6 +2120,8 @@ function PastCharges({ client, state }) {
 const SECRET_FIELDS = ["portalPassword", "adminPassword", "maritzPortalPassword", "maritzAdminPassword", "maritzUserLists", "userLists"];
 function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onEmail, onAddClient, currentUser }) {
   const drawerTemplates = getTemplates(settings);
+  const [staff, setStaff] = useState([]);
+  useEffect(() => { fetch("/api/staff").then((r) => r.json()).then((d) => setStaff(d.staff || [])).catch(() => {}); }, []);
   const [secrets, setSecrets] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -2021,6 +2276,18 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Field label="Email"><input style={inputStyle} value={client.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Phone"><input style={inputStyle} value={client.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
             <Field label="ChargeOver ID"><input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" /></Field>
+            <Field label="Owner">
+              <CompactSelect value={client.owner || ""} onChange={(e) => set({ owner: e.target.value })}>
+                <option value="">Unassigned</option>
+                {staff.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+              </CompactSelect>
+            </Field>
+            <Field label="Flag">
+              <CompactSelect value={client.flag || ""} onChange={(e) => set({ flag: e.target.value })}>
+                <option value="">None</option>
+                {Object.entries(CLIENT_FLAGS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </CompactSelect>
+            </Field>
             <Field label="Email status">
               <CompactSelect value={client.emailStatus} onChange={(e) => set({ emailStatus: e.target.value })}>
                 <option value="ok">Deliverable</option><option value="bounced">Bounced</option><option value="undelivered">Undelivered</option>

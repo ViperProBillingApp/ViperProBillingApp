@@ -16,7 +16,7 @@ Two batches shipped after this audit. Status per finding:
 
 | ID | Finding | Severity | Status |
 | --- | --- | --- | --- |
-| F-01 | Plaintext credential store | Critical | **Open** — top remaining risk. The per-row read model (F-08) is now in place, so the natural fix is: the list read omits secret fields and a per-client detail fetch returns them (decrypted), instead of shipping the whole store to every browser |
+| F-01 | Plaintext credential store | Critical | **Partly fixed** — reveal-on-demand shipped: the bulk load no longer ships any secret (portal/admin/maritz passwords, user lists, staff `visible_password`); each is revealed one record at a time via `/api/clients/[id]/secrets` and `/api/users/[id]/password`, audited, and saves preserve stored secrets so a stripped client can't wipe them. **Still open:** encryption-at-rest — secrets remain plaintext in the DB. Needs an `ENCRYPTION_KEY` provisioned in Vercel + `.env.local` (key-loss = secret-loss); composes with the reveal model already in place |
 | F-02 | No MFA | High | **Fixed** — TOTP (`lib/totp.js`), enroll/login/disable, verified live |
 | F-03 | No immutable audit trail | High | **Fixed** — append-only `audit_log`, admin viewer |
 | F-04 | No automated backup | High | **Fixed** — nightly `state_backups` ring in the cron (restore still to be drilled) |
@@ -32,14 +32,14 @@ Two batches shipped after this audit. Status per finding:
 | F-14 | Expired tokens never GC'd | Obs | **Fixed** — GC in the daily cron |
 | F-15 | No robots.txt | Obs | **Fixed** — `public/robots.txt` |
 
-Net: the dominant risk theme has shifted. Of the "five greatest risks" below,
-audit-trail, backup, single-factor auth, and the whole-array overwrite hazard
-are all addressed — the last via F-08 Phase 2, after which no tab can overwrite
-clients it didn't touch. What remains: the plaintext credential concentration
-(F-01), and the browser-side exposure of that store, since the load path still
-ships every client (with secrets) to the browser until F-08 Phase 3 flips reads
-to per-row. **F-01 is now the single highest open risk** and is the right next
-piece of work; it composes cleanly with Phase 3.
+Net: every one of the "five greatest risks" below has now been addressed —
+audit-trail, backup, single-factor auth, the whole-array overwrite hazard (F-08),
+and the browser-side credential exposure (F-01 reveal-on-demand: secrets no
+longer ship in the bulk load, each is revealed one record at a time and audited).
+**The one remaining piece of F-01 is encryption-at-rest** — secrets are still
+plaintext in the database, so a raw DB dump still exposes them. That's the single
+highest open risk now, and it's gated on you provisioning an `ENCRYPTION_KEY`
+(Vercel + `.env.local`, identical, never lost). Everything else is Low (F-12).
 
 ## 0. Scope correction (read this first)
 

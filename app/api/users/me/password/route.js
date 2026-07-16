@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../../lib/db.js";
 import { getSessionUser, hashPassword } from "../../../../../lib/auth.js";
+import { writeAudit } from "../../../../../lib/security.js";
 
 // No current-password check: the card shows the signed-in user their live
 // password (visible_password) instead, so re-typing it proves nothing extra.
@@ -13,5 +14,6 @@ export async function POST(req) {
   const db = await getDb();
   // keep the visible copy current so the "Current password" display stays truthful
   await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(String(next)), String(next), me.id]);
+  await writeAudit({ actorId: me.id, actorEmail: me.email, action: "password.self_change", req });
   return NextResponse.json({ ok: true });
 }

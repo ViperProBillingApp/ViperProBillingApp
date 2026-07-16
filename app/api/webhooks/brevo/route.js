@@ -3,7 +3,8 @@ import { getDb } from "../../../../lib/db.js";
 
 // Brevo transactional event webhook → flag the matching client's email as bad.
 // Public, unauthenticated route by nature — guarded by a shared secret Brevo
-// sends as a custom header (X-Brevo-Secret) or ?secret= query param.
+// sends as a custom header (X-Brevo-Secret). F-11: header only — a secret in the
+// query string leaks via logs and referrers.
 // ponytail: mutates the whole-state blob (last-write-wins with the UI's saves);
 // fine at this volume, revisit if clients move to per-row storage.
 
@@ -13,8 +14,7 @@ const SOFT_EVENTS = new Set(["soft_bounce", "deferred"]);
 function authorized(req) {
   const want = process.env.BREVO_WEBHOOK_SECRET;
   if (!want) return false; // not configured = closed
-  const got = req.headers.get("x-brevo-secret") || new URL(req.url).searchParams.get("secret");
-  return got === want;
+  return req.headers.get("x-brevo-secret") === want;
 }
 
 export async function POST(req) {

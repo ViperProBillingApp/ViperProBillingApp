@@ -19,6 +19,8 @@ export default function LoginForm() {
   const [mode, setMode] = useState("signin"); // signin | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [mfaStep, setMfaStep] = useState(false); // password accepted, awaiting 2FA code
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(null); // null | {emailConfigured}
@@ -31,10 +33,14 @@ export default function LoginForm() {
       const r = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, code: code || undefined }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) { setError(d.error || "Sign in failed. Try again."); setBusy(false); return; }
+      if (r.ok && d.mfaRequired) { setMfaStep(true); setBusy(false); return; } // ask for the code
+      if (!r.ok) {
+        if (d.mfaRequired) setMfaStep(true);
+        setError(d.error || "Sign in failed. Try again."); setBusy(false); return;
+      }
       window.location.href = "/";
     } catch {
       setError("Couldn't reach the server. Try again.");
@@ -91,8 +97,15 @@ export default function LoginForm() {
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, display: "block", marginBottom: 6 }}>Password</span>
                 <input className="login-input" style={inputStyle} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
               </label>
+              {mfaStep && (
+                <label style={{ display: "block", marginBottom: 18 }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, color: C.sub, display: "block", marginBottom: 6 }}>Authentication code</span>
+                  <input className="login-input" style={{ ...inputStyle, fontFamily: MONO, letterSpacing: 4 }} type="text" inputMode="numeric" autoComplete="one-time-code" maxLength={6} autoFocus placeholder="000000" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} />
+                  <span style={{ fontSize: 12, color: C.faint, display: "block", marginTop: 6 }}>Enter the 6-digit code from your authenticator app.</span>
+                </label>
+              )}
               {error && <p style={{ color: C.red, fontSize: 13, marginBottom: 14 }}>{error}</p>}
-              <button type="submit" disabled={busy} className="login-btn" style={primaryBtn(busy)}>{busy ? "Signing in…" : "Sign in"}</button>
+              <button type="submit" disabled={busy} className="login-btn" style={primaryBtn(busy)}>{busy ? "Signing in…" : mfaStep ? "Verify" : "Sign in"}</button>
               <div style={{ marginTop: 16 }}>
                 <button type="button" onClick={goForgot} style={linkStyle}>Forgot your password?</button>
               </div>

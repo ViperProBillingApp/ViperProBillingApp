@@ -157,6 +157,10 @@ export default function UsersAdmin({ me, embedded = false }) {
 
       <ChangePassword onCall={call} onDone={() => setNotice({ title: "Your password was updated." })} />
 
+      <TwoFactor onCall={call} onNotice={setNotice} />
+
+      {isAdmin && <AuditLog onCall={call} />}
+
       <p style={{ color: C.faint, fontSize: 11.5, marginTop: 8 }}>
         Deactivating a user keeps their account but blocks sign-in and ends their sessions. Delete is permanent.
         Signature images are added to the bottom of every outgoing client email that user sends.
@@ -373,6 +377,93 @@ function AddUser({ onCall, onDone }) {
           Create user
         </button>
       </div>
+    </Card>
+  );
+}
+
+// F-02: TOTP two-factor enrollment. start → show secret → confirm code → enabled.
+function TwoFactor({ onCall, onNotice }) {
+  const [enabled, setEnabled] = useState(null); // null until loaded
+  const [enroll, setEnroll] = useState(null);   // { secret, otpauth } during setup
+  const [code, setCode] = useState("");
+  const [pw, setPw] = useState("");
+  const load = async () => { const d = await onCall("/api/users/me", "GET"); if (d) setEnabled(!!d.user.totp_enabled); };
+  useEffect(() => { load(); }, []);
+  if (enabled === null) return null;
+  return (
+    <Card title="Two-factor authentication">
+      {enabled ? (
+        <>
+          <p style={{ fontSize: 13.5, color: C.sub, marginBottom: 12 }}>
+            <strong style={{ color: C.green }}>On.</strong> Sign-in requires a code from your authenticator app.
+          </p>
+          <div className="flex" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 200px" }}>
+              <Field label="Current password to turn off"><input style={inputStyle} type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Field>
+            </div>
+            <button style={{ ...btn(false), color: C.red }} onClick={async () => {
+              if (await onCall("/api/users/me/totp", "POST", { action: "disable", password: pw })) { setPw(""); onNotice({ title: "Two-factor turned off." }); load(); }
+            }}>Turn off</button>
+          </div>
+        </>
+      ) : enroll ? (
+        <>
+          <p style={{ fontSize: 13.5, color: C.sub, marginBottom: 10 }}>Add this key to your authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.</p>
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: C.sub }}>Setup key</span>
+            <code style={{ display: "block", fontFamily: MONO, fontSize: 14, fontWeight: 600, background: C.paper, padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.line}`, marginTop: 4, wordBreak: "break-all" }}>{enroll.secret}</code>
+          </div>
+          <div className="flex" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 160px" }}>
+              <Field label="6-digit code"><input style={{ ...inputStyle, fontFamily: MONO, letterSpacing: 3 }} inputMode="numeric" maxLength={6} placeholder="000000" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} /></Field>
+            </div>
+            <button style={btn(true)} onClick={async () => {
+              if (await onCall("/api/users/me/totp", "POST", { action: "enable", code })) { setEnroll(null); setCode(""); onNotice({ title: "Two-factor is on." }); load(); }
+            }}>Confirm</button>
+            <button style={btn(false)} onClick={() => { setEnroll(null); setCode(""); }}>Cancel</button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 13.5, color: C.sub, marginBottom: 12 }}>Off. Add a second factor so a stolen password isn't enough to sign in.</p>
+          <button style={btn(true)} onClick={async () => { const d = await onCall("/api/users/me/totp", "POST", { action: "start" }); if (d) setEnroll(d); }}>Set up two-factor</button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function AuditLog({ onCall }) {
+  const [events, setEvents] = useState(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => { if (open && !events) onCall("/api/audit?limit=200", "GET").then((d) => d && setEvents(d.events)); }, [open]);
+  const when = (ts) => new Date(Number(ts)).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  return (
+    <Card title="Audit log">
+      {!open ? (
+        <button style={btn(false)} onClick={() => setOpen(true)}>Show recent activity</button>
+      ) : events === null ? (
+        <p style={{ fontSize: 13, color: C.faint }}>Loading…</p>
+      ) : events.length === 0 ? (
+        <p style={{ fontSize: 13, color: C.faint }}>No events recorded yet.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12.5 }}>
+            <thead><tr>{["When", "Who", "Action", "Detail", "IP"].map((h) => <th key={h} style={{ textAlign: "left", color: C.sub, fontWeight: 600, padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.line}`, whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.id}>
+                  <td style={{ padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.lineSoft}`, whiteSpace: "nowrap", fontFamily: MONO, color: C.sub }}>{when(e.ts)}</td>
+                  <td style={{ padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.lineSoft}`, whiteSpace: "nowrap" }}>{e.actor_email || "—"}</td>
+                  <td style={{ padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.lineSoft}`, whiteSpace: "nowrap", fontFamily: MONO }}>{e.action}</td>
+                  <td style={{ padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.lineSoft}` }}>{[e.entity && `${e.entity} ${e.entity_id}`, e.detail].filter(Boolean).join(" · ")}</td>
+                  <td style={{ padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.lineSoft}`, whiteSpace: "nowrap", fontFamily: MONO, color: C.faint }}>{e.ip || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   );
 }

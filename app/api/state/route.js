@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser } from "../../../lib/auth.js";
+import { writeAudit } from "../../../lib/security.js";
 
 // Whole-state blob with a revision guard: every write bumps `rev`, and a PUT
 // carrying an older rev is rejected (409) instead of silently clobbering newer
@@ -33,9 +34,17 @@ export async function PUT(req) {
     return NextResponse.json({ error: "stale", rev: currentRev }, { status: 409 });
   }
   const rev = currentRev + 1;
+  // Flag a sharp drop in client count — the exact shape of the two historical
+  // stale-tab overwrites. Doesn't block (can't tell a real bulk delete from a
+  // clobber), but leaves an audit breadcrumb naming who saved it.
+  const prevCount = rows[0] ? (JSON.parse(rows[0].value).clients?.length || 0) : 0;
+  const newCount = body.clients.length;
   await db.query(
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify({ clients: body.clients, settings: body.settings || {}, rev })]
   );
+  if (prevCount - newCount >= 5) {
+    await writeAudit({ actorId: user.id, actorEmail: user.email, action: "state.bulk_drop", detail: `clients ${prevCount} → ${newCount} (rev ${rev})`, req });
+  }
   return NextResponse.json({ ok: true, rev });
 }

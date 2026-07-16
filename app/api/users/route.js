@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser, hashPassword, generatePassword } from "../../../lib/auth.js";
+import { writeAudit } from "../../../lib/security.js";
 
 async function requireAdmin() {
   const me = await getSessionUser();
@@ -20,7 +21,7 @@ export async function GET() {
 }
 
 export async function POST(req) {
-  const [, err] = await requireAdmin();
+  const [me, err] = await requireAdmin();
   if (err) return err;
   const body = await req.json().catch(() => ({}));
   const email = String(body.email || "").trim();
@@ -38,9 +39,11 @@ export async function POST(req) {
       "INSERT INTO users (email, name, hash, role, visible_password) VALUES ($1, $2, $3, $4, $5) RETURNING id",
       [email, String(body.name || "").trim(), hashPassword(password), role, password]
     );
+    await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.create", entity: "user", entityId: String(rows[0].id), detail: `${email} (${role})`, req });
     return NextResponse.json({
       user: { id: rows[0].id, email, name: body.name || "", role, active: true },
-      // returned once so the admin can hand it over; not stored in plain text
+      // F-13: visible_password IS stored in plaintext by design (admin hand-over).
+      // Returned here so the admin sees an admin-assigned password once.
       tempPassword: body.password ? undefined : password,
     });
   } catch (e) {

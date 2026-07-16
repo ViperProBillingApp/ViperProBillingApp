@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { getSessionUser } from "../../../lib/auth.js";
+import { rateLimit } from "../../../lib/security.js";
 
 export async function POST(req) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  // F-10: each call spends Opus tokens + web searches — cap per user.
+  const { limited } = await rateLimit(`recover:${user.id}`, 30, 60 * 60 * 1000);
+  if (limited) return NextResponse.json({ error: "Recovery limit reached (30/hour). Try again later." }, { status: 429 });
   if (!process.env.ANTHROPIC_API_KEY) {
     return NextResponse.json(
       { error: "Contact recovery needs an Anthropic API key. Add ANTHROPIC_API_KEY to .env.local and restart." },

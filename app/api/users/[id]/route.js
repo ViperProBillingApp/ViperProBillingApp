@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser, destroyUserSessions, hashPassword } from "../../../../lib/auth.js";
+import { writeAudit } from "../../../../lib/security.js";
 
 async function requireAdmin() {
   const me = await getSessionUser();
@@ -40,13 +41,16 @@ export async function PATCH(req, { params }) {
     if (String(body.password).length < 8) return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
     await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(String(body.password)), String(body.password), userId]);
     if (userId !== me.id) await destroyUserSessions(userId); // new password = their old sessions end
+    await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.password_reset", entity: "user", entityId: String(userId), req });
   }
   if (body.role !== undefined) {
     await db.query("UPDATE users SET role = $1 WHERE id = $2", [body.role === "admin" ? "admin" : "staff", userId]);
+    await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.role_change", entity: "user", entityId: String(userId), detail: `→ ${body.role === "admin" ? "admin" : "staff"}`, req });
   }
   if (body.active !== undefined) {
     await db.query("UPDATE users SET active = $1 WHERE id = $2", [!!body.active, userId]);
     if (!body.active) await destroyUserSessions(userId); // revoking access signs them out everywhere
+    await writeAudit({ actorId: me.id, actorEmail: me.email, action: body.active ? "user.activate" : "user.deactivate", entity: "user", entityId: String(userId), req });
   }
   // profile images (data URLs) — headshot shown on the card, signature appended to outgoing email
   const okImg = (v) => v === null || v === "" || (typeof v === "string" && v.startsWith("data:image/") && v.length <= 900_000);
@@ -68,6 +72,8 @@ export async function DELETE(req, { params }) {
   if (userId === me.id) return NextResponse.json({ error: "You can't delete your own account." }, { status: 400 });
   await destroyUserSessions(userId);
   const db = await getDb();
+  const { rows: t } = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
   await db.query("DELETE FROM users WHERE id = $1", [userId]);
+  await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.delete", entity: "user", entityId: String(userId), detail: t[0]?.email || "", req });
   return NextResponse.json({ ok: true });
 }

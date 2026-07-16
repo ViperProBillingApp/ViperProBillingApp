@@ -3,6 +3,7 @@ import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { computeKpis, topOwed, fmtMoney, arrearsPeriods } from "../../../../lib/metrics.js";
 import { sendDigestEmail } from "../../../../lib/email.js";
+import { snapshotState, gcExpired } from "../../../../lib/security.js";
 
 export const maxDuration = 60;
 
@@ -12,6 +13,11 @@ export const maxDuration = 60;
 // Idempotent on date — a re-run the same day does nothing.
 async function runDaily() {
   const db = await getDb();
+  // F-04 + F-14: automated state backup and expired-row housekeeping, first,
+  // so a later failure in the digest still leaves us with a fresh snapshot.
+  const backup = await snapshotState().catch((e) => ({ backed: false, reason: e.message }));
+  await gcExpired().catch((e) => console.error("gc failed:", e.message));
+
   const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
   const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: {} };
   const active = (state.clients || []).filter((c) => !c.archivedClient); // same filter the UI tabs use
@@ -20,7 +26,7 @@ async function runDaily() {
   const snapRow = await db.query("SELECT value FROM kv WHERE key = 'snapshots'");
   const snapshots = snapRow.rows[0] ? JSON.parse(snapRow.rows[0].value) : [];
   if (snapshots.length && snapshots[snapshots.length - 1].date === k.date) {
-    return { ok: true, alreadyRan: k.date };
+    return { ok: true, alreadyRan: k.date, backup }; // backup/GC still ran above
   }
   snapshots.push(k);
   // ponytail: one JSON array, capped at 2 years of daily rows; move to a table if it ever hurts
@@ -30,7 +36,7 @@ async function runDaily() {
   );
 
   const { rows: staff } = await db.query("SELECT email, name FROM users WHERE active = true");
-  if (!staff.length) return { ok: true, snapshot: k.date, emailed: false, reason: "no active staff" };
+  if (!staff.length) return { ok: true, snapshot: k.date, emailed: false, reason: "no active staff", backup };
 
   const cur = (state.settings || {}).currency || "GBP";
   const owed = topOwed(active, 10);
@@ -53,7 +59,7 @@ ${owed.length ? `<p style="margin-top:16px"><strong>Largest balances</strong></p
 <p>Best,<br>ViperPro Accounting Team</p>`;
 
   const emailed = await sendDigestEmail(staff.map((u) => ({ email: u.email, name: u.name || "" })), `ViperPro daily digest — ${fmtMoney(k.totalOwed, cur)} owed, ${k.overdue} in arrears`, html);
-  return { ok: true, snapshot: k.date, emailed, recipients: staff.length };
+  return { ok: true, snapshot: k.date, emailed, recipients: staff.length, backup };
 }
 
 export async function GET(req) {

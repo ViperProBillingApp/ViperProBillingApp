@@ -9,7 +9,7 @@ export async function GET() {
   const me = await getSessionUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   return NextResponse.json({
-    user: { id: me.id, email: me.email, name: me.name, role: me.role, visible_password: me.visible_password || null, headshot: me.headshot || null, signature_image: me.signature_image || null },
+    user: { id: me.id, email: me.email, name: me.name, role: me.role, visible_password: me.visible_password || null, headshot: me.headshot || null, signature_image: me.signature_image || null, totp_enabled: !!me.totp_enabled },
   });
 }
 

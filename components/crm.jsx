@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
-import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed } from "../lib/metrics.js";
+import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed, csvSafe, csvSafeRow } from "../lib/metrics.js";
 import UsersAdmin from "./users-admin.jsx";
 
 /* ================================================================== *
@@ -310,7 +310,7 @@ function exportCsv(clients) {
   const cols = ["chargeoverId", "name", "company", "email", "phone", "segment", "billingStatus", "stage", "tags", "amount", "currency", "cadence", "billingDay", "lastPaid", "periodsBehind", "totalOwed", "followUp", "notes", "emailStatus"];
   const rows = clients.map((c) => cols.map((k) => {
     let v = k === "tags" ? c.tags.join("|") : k === "periodsBehind" ? arrearsPeriods(c) : k === "totalOwed" ? totalOwed(c) : k === "lastPaid" ? (lastPaymentDate(c) ? iso(lastPaymentDate(c)) : "") : k === "notes" ? (c.noteCards || []).map((n) => n.text).join(" | ") : c[k] ?? "";
-    v = String(v);
+    v = csvSafe(String(v)); // F-09: neutralise formula injection before quoting
     return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
   }).join(","));
   download(`viper-clients-${iso()}.csv`, [cols.join(","), ...rows].join("\n"), "text/csv");
@@ -1013,7 +1013,7 @@ function ReportsTab({ clients, settings, onOpen }) {
     }).sort((a, b) => b.days - a.days || b.balance - a.balance);
   }, [ar, byCo]);
   const exportAr = () => {
-    const csv = Papa.unparse(arRows.map((r) => ({
+    const csv = Papa.unparse(arRows.map((r) => csvSafeRow({
       client: r.client ? (r.client.company || r.client.name) : `CO customer ${r.customerId}`,
       invoice: r.number, invoiceDate: r.date, dueDate: r.dueDate,
       total: r.total, balance: r.balance, daysOverdue: r.days, bucket: r.bucket.label,

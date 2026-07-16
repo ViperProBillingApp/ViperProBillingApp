@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
+import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed } from "../lib/metrics.js";
 import UsersAdmin from "./users-admin.jsx";
 
 /* ================================================================== *
@@ -11,8 +12,6 @@ import UsersAdmin from "./users-admin.jsx";
  * Storage: /api/state (SQLite-backed, whole-state, debounced saves).
  * Contact recovery: /api/recover (server-side Claude web search).
  * ================================================================== */
-
-const SYMBOL = { GBP: "£", USD: "$", EUR: "€" };
 
 /* ------------------------------ Axes ------------------------------ */
 const SEGMENTS = {
@@ -53,8 +52,6 @@ const TAGS = {
   "payment-plan": { label: "On payment plan", color: "#3B5BA5" },
   "disputed": { label: "Disputed charge", color: C.red },
 };
-const CADENCE = { monthly: { label: "Monthly", months: 1 }, annual: { label: "Annual", months: 12 } };
-
 /* ----------------------------- Helpers ----------------------------- */
 function pad(n) { return String(n).padStart(2, "0"); }
 function iso(d = new Date()) { return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
@@ -68,11 +65,6 @@ function firstName(n) { return (n || "there").trim().split(/\s+/)[0]; }
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function monthIndex(d) { return d.getFullYear() * 12 + d.getMonth(); }
 
-// A group member whose billing is carried by the group's master card:
-// it owes nothing itself and never gets reminders.
-function coveredByGroup(c) {
-  return !!(c.multiOffice && c.priceMode === "group" && !c.groupBillingMaster);
-}
 // Group pricing tiers by linked-office count (monthly / annual, editable globally).
 const GROUP_TIER_DEFAULTS = { t1m: 40, t1y: 400, t2m: 100, t2y: 1000, t3m: 150, t3y: 1500, t4m: 200, t4y: 2000 };
 function groupTierFor(count, t = GROUP_TIER_DEFAULTS) {
@@ -82,78 +74,14 @@ function groupTierFor(count, t = GROUP_TIER_DEFAULTS) {
   return { m: t.t4m, y: t.t4y, label: "11+ offices" };
 }
 
-function lastPaymentDate(c) {
-  let best = parseDate(c.lastPaid);
-  for (const p of c.payments || []) { const d = parseDate(p.date); if (d && (!best || d > best)) best = d; }
-  return best;
-}
-// How many billing periods is this client behind? 0 = current.
-// Single source of truth for "who owes what" — do not duplicate elsewhere.
-function periodsBehind(c, now = new Date()) {
-  if (coveredByGroup(c)) return 0; // billed via the group's master card
-  if (["never-charged", "marked-deletion"].includes(c.billingStatus)) return 0;
-  if (c.stage === "marked-deletion") return 0;
-  const cad = CADENCE[c.cadence]?.months || 1;
-  const day = Number(c.billingDay) || 1;
-  // No payment on record yet? Anchor to signup instead — treats "just joined"
-  // the same as "just paid," so a brand-new client isn't instantly counted as
-  // owing their first period before a single billing cycle has even elapsed.
-  const anchor = lastPaymentDate(c) || parseDate(c.createdAt) || now;
-  let diff = monthIndex(now) - monthIndex(anchor);
-  if (now.getDate() < day) diff -= 1; // current period not yet due if we're before the billing day
-  return Math.max(0, Math.min(24, Math.floor(diff / cad)));
-}
-// What's actually owed RIGHT NOW. ChargeOver pre-generates upcoming invoices,
-// so the raw customer balance can include charges that aren't due yet — the
-// sync stores the overdue-only figure in coOverdue, which wins when present.
-function owedBalance(c) { return c.coOverdue != null ? c.coOverdue : c.coBalance; }
-// Real ChargeOver balance beats the calendar-based guess whenever we have one —
-// dividing it by the recorded rate gives "how many periods' worth is owed"
-// without depending on billingDay/lastPaid bookkeeping being accurate. This is
-// what makes "final notice" and "total owed" trustworthy for synced clients.
-function arrearsPeriods(c, now = new Date()) {
-  if (coveredByGroup(c)) return 0;
-  const owed = owedBalance(c);
-  if (owed != null && Number(c.amount) > 0) {
-    if (owed <= 0) return 0;
-    return Math.max(1, Math.min(24, Math.round(owed / Number(c.amount))));
-  }
-  return periodsBehind(c, now);
-}
-function totalOwed(c, now = new Date()) {
-  if (coveredByGroup(c)) return 0;
-  const owed = owedBalance(c);
-  if (owed != null) return Math.max(0, owed);
-  return periodsBehind(c, now) * (Number(c.amount) || 0);
-}
-// Who needs a payment reminder. periodsBehind only works once we know recurring
-// amounts — the ChargeOver billing status is the reliable signal for CSV-imported
-// clients, so either counts.
-function needsReminder(c, now = new Date()) {
-  if (coveredByGroup(c)) return false;
-  if (["never-charged", "marked-deletion"].includes(c.billingStatus) || c.stage === "marked-deletion") return false;
-  return arrearsPeriods(c, now) >= 1 || ["not-up-to-date", "payment-failed"].includes(c.billingStatus);
-}
+// Money math (periodsBehind, owedBalance, totalOwed, …) lives in lib/metrics.js —
+// shared with the daily-digest cron so the email can never disagree with the UI.
 function escalationOf(c) {
   const n = arrearsPeriods(c);
   if (n >= 3) return { level: 3, label: "Final notice", color: C.red };
   if (n === 2) return { level: 2, label: "Second reminder", color: C.amber };
   if (n === 1) return { level: 1, label: "Reminder", color: C.amber };
   return null;
-}
-function monthlyValue(c) { return coveredByGroup(c) ? 0 : (Number(c.amount) || 0) / (CADENCE[c.cadence]?.months || 1); }
-// Compare calendar dates as "YYYY-MM-DD" strings, not Date objects — a
-// date-only string parses as UTC midnight, which can read as "not due yet"
-// or "already due" depending on the browser's timezone offset from UTC.
-function followUpDue(c, now = new Date()) { return !!c.followUp && c.followUp <= iso(now); }
-// Who needs a follow-up. An explicit follow-up date that's due always counts;
-// otherwise it's derived from the workflow — "need to contact" and "contacted ·
-// awaiting reply" are the stages where the ball is in your court. Skips
-// archived / former clients.
-const FOLLOWUP_STAGES = ["need-to-contact", "contacted-awaiting"];
-function needsFollowUp(c, now = new Date()) {
-  if (c.archivedClient || c.formerCustomer) return false;
-  return followUpDue(c, now) || FOLLOWUP_STAGES.includes(c.stage);
 }
 function logActivity(c, type, text) {
   return [{ at: new Date().toISOString(), type, text }, ...(c.activity || [])].slice(0, 200);
@@ -646,7 +574,7 @@ export default function CRM({ user }) {
           </div>
           {/* Tab row — actions live on the same line, right-aligned */}
           <nav className="flex items-end" style={{ gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
-            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
+            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"], ["reports", "Reports"]].map(([k, t]) => (
               <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
             <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
@@ -669,6 +597,7 @@ export default function CRM({ user }) {
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
+            {tab === "reports" && <ReportsTab clients={active} settings={settings} onOpen={setDetailId} />}
           </>
         )}
 
@@ -1004,33 +933,10 @@ function ComposeModal({ client, settings, templates, initialType, onClose, onLog
 /* ---------------------------- Stat strip ---------------------------- */
 function StatStrip({ clients, settings, bounced }) {
   const s = useMemo(() => {
-    const owedByCur = {}; let overdue = 0, mrr = 0, mrrKnown = 0, notUpToDate = 0, followUps = 0, synced = 0;
-    const now = new Date();
-    for (const c of clients) {
-      const cur = c.currency || settings.currency;
-      // Prefer ChargeOver's own balance (live from last sync) over the
-      // periods×amount estimate — that estimate is only as good as `amount`,
-      // which most imported clients don't have set.
-      if (coveredByGroup(c)) {
-        if (c.coBalance != null) synced++;
-        // billed via group master — its own balance never counts as owed
-      } else if (c.coBalance != null) {
-        synced++;
-        const owed = owedBalance(c);
-        if (owed > 0) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + owed; }
-      } else {
-        const behind = periodsBehind(c, now);
-        if (behind >= 1) { overdue++; owedByCur[cur] = (owedByCur[cur] || 0) + behind * (Number(c.amount) || 0); }
-      }
-      if (!["marked-deletion", "never-charged"].includes(c.billingStatus) && c.stage !== "marked-deletion") {
-        mrr += monthlyValue(c);
-        if (Number(c.amount) > 0) mrrKnown++;
-      }
-      if (["not-up-to-date", "payment-failed"].includes(c.billingStatus)) notUpToDate++;
-      if (needsFollowUp(c, now)) followUps++;
-    }
-    const owedStr = Object.entries(owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
-    return { owedStr, overdue, mrr, mrrKnown, notUpToDate, followUps, synced, total: clients.length };
+    // One aggregation for the strip, the Reports tab, and the digest cron — lib/metrics.js.
+    const k = computeKpis(clients, settings);
+    const owedStr = Object.entries(k.owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
+    return { ...k, owedStr, total: k.totalClients };
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
@@ -1051,6 +957,189 @@ function Stat({ label, value, sub, accent, small }) {
       </div>
       <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25 }}>{value}</div>
       <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
+    </div>
+  );
+}
+
+/* ---------------------------- Reports tab ---------------------------- */
+// Tiny inline sparkline — trends don't warrant a chart library at this size.
+function Spark({ data, color, w = 240, h = 48 }) {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data), max = Math.max(...data), span = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - 4 - ((v - min) / span) * (h - 8)}`).join(" ");
+  return (
+    <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} aria-hidden>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+const AGE_BUCKETS = [
+  { key: "current", label: "Not yet due", max: 0 },
+  { key: "b30", label: "1–30 days", max: 30 },
+  { key: "b60", label: "31–60 days", max: 60 },
+  { key: "b90", label: "61–90 days", max: 90 },
+  { key: "b120", label: "91–120 days", max: 120 },
+  { key: "b120p", label: "120+ days", max: Infinity },
+];
+function ageBucketOf(days) { return AGE_BUCKETS.find((b) => days <= b.max) || AGE_BUCKETS[5]; }
+
+function ReportsTab({ clients, settings, onOpen }) {
+  const k = useMemo(() => computeKpis(clients, settings), [clients, settings]);
+  const owed = useMemo(() => topOwed(clients, 15), [clients]);
+  const byCo = useMemo(() => { const m = {}; for (const c of clients) if (c.chargeoverId) m[c.chargeoverId] = c; return m; }, [clients]);
+  const [snaps, setSnaps] = useState(null);
+  const [ar, setAr] = useState(null); // null → not requested · "loading" · {invoices} · {error}
+  useEffect(() => {
+    fetch("/api/reports").then((r) => r.json()).then((d) => setSnaps(d.snapshots || [])).catch(() => setSnaps([]));
+  }, []);
+  const cur = settings.currency;
+  const panel = { background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14 };
+  const h2 = { fontFamily: DISPLAY, fontSize: 15, fontWeight: 600, marginBottom: 8 };
+  const th = { textAlign: "left", color: C.sub, fontWeight: 600, fontSize: 11, padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.line}`, textTransform: "uppercase", letterSpacing: "0.04em" };
+  const td = { padding: "5px 10px 5px 0", borderBottom: `1px solid ${C.lineSoft}`, fontSize: 12.5 };
+
+  const loadAr = () => {
+    setAr("loading");
+    fetch("/api/reports/ar").then((r) => r.json()).then((d) => setAr(d.error ? { error: d.error } : d)).catch((e) => setAr({ error: String(e) }));
+  };
+  const arRows = useMemo(() => {
+    if (!ar?.invoices) return null;
+    const today = new Date();
+    return ar.invoices.map((inv) => {
+      const due = parseDate(inv.dueDate);
+      const days = due ? Math.floor((today - due) / 86400000) : 0;
+      const client = byCo[inv.customerId];
+      return { ...inv, days: Math.max(0, days), bucket: ageBucketOf(Math.max(0, days)), client };
+    }).sort((a, b) => b.days - a.days || b.balance - a.balance);
+  }, [ar, byCo]);
+  const exportAr = () => {
+    const csv = Papa.unparse(arRows.map((r) => ({
+      client: r.client ? (r.client.company || r.client.name) : `CO customer ${r.customerId}`,
+      invoice: r.number, invoiceDate: r.date, dueDate: r.dueDate,
+      total: r.total, balance: r.balance, daysOverdue: r.days, bucket: r.bucket.label,
+    })));
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    a.download = `ar-ageing-${iso()}.csv`;
+    a.click();
+  };
+
+  return (
+    <div className="grid" style={{ gap: 12 }}>
+      {/* KPI cards — every figure comes from computeKpis, same as the header strip */}
+      <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+        <Stat label="Monthly recurring revenue" value={money(k.mrr, cur)} sub={`billing packages · ${k.mrrKnown}/${k.totalClients} amounts known`} accent={C.green} />
+        <Stat label="Annual recurring revenue" value={money(k.arr, cur)} sub="MRR × 12" accent={C.green} />
+        <Stat label="Total owed" value={money(k.totalOwed, cur)} sub={`${k.overdue} clients in arrears`} accent={k.totalOwed ? C.red : C.green} />
+        <Stat label="Final notice" value={String(k.finalNotice)} sub="3+ periods behind" accent={k.finalNotice ? C.red : C.green} />
+        <Stat label="Not up to date" value={String(k.notUpToDate)} sub="per ChargeOver status" accent={k.notUpToDate ? C.red : C.green} />
+        <Stat label="Follow-ups" value={String(k.followUps)} sub="to contact / awaiting reply" accent={k.followUps ? C.amber : C.green} />
+        <Stat label="Active paying clients" value={String(k.activeClients)} sub={`of ${k.totalClients} cards`} accent={C.action} />
+        <Stat label="ChargeOver synced" value={`${k.synced}/${k.totalClients}`} sub="cards with a live balance" accent={C.action} />
+      </section>
+
+      <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+        {/* Trends from daily snapshots */}
+        <section style={panel}>
+          <div style={h2}>Trends</div>
+          {snaps === null ? <div style={{ fontSize: 12, color: C.faint }}>Loading…</div>
+            : snaps.length < 2 ? (
+              <div style={{ fontSize: 12.5, color: C.sub, lineHeight: 1.5 }}>
+                Trends build from the daily 06:30 snapshot job. {snaps.length === 0 ? "No snapshots yet — lines appear after it has run for a couple of days." : "One snapshot so far — lines appear tomorrow."}
+              </div>
+            ) : (
+              <div className="grid" style={{ gap: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: C.sub, marginBottom: 2 }}>MRR · {money(snaps[snaps.length - 1].mrr, cur)}</div>
+                  <Spark data={snaps.map((s) => s.mrr)} color={C.green} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: C.sub, marginBottom: 2 }}>Total owed · {money(snaps[snaps.length - 1].totalOwed, cur)}</div>
+                  <Spark data={snaps.map((s) => s.totalOwed)} color={C.red} />
+                </div>
+                <div style={{ fontSize: 10.5, color: C.faint }}>{snaps.length} daily snapshots since {fmtDate(snaps[0].date)}</div>
+              </div>
+            )}
+        </section>
+
+        {/* Composition */}
+        <section style={panel}>
+          <div style={h2}>Clients by segment</div>
+          {Object.entries(SEGMENTS).map(([key, s]) => (
+            <div key={key} className="flex items-center" style={{ gap: 8, padding: "3px 0", fontSize: 12.5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 7, background: s.color, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>{s.label}</span>
+              <span style={{ fontFamily: MONO, fontWeight: 600 }}>{k.bySegment[key] || 0}</span>
+            </div>
+          ))}
+          <div style={{ ...h2, marginTop: 12 }}>Workflow stages</div>
+          {STAGE_ORDER.map((key) => (
+            <div key={key} className="flex items-center" style={{ gap: 8, padding: "3px 0", fontSize: 12.5 }}>
+              <span style={{ width: 7, height: 7, borderRadius: 7, background: STAGES[key].color, flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>{STAGES[key].label}</span>
+              <span style={{ fontFamily: MONO, fontWeight: 600 }}>{k.byStage[key] || 0}</span>
+            </div>
+          ))}
+        </section>
+      </div>
+
+      {/* Largest balances — the chase list */}
+      <section style={panel}>
+        <div style={h2}>Largest outstanding balances</div>
+        {owed.length === 0 ? <div style={{ fontSize: 12.5, color: C.sub }}>No outstanding balances.</div> : (
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead><tr><th style={th}>Client</th><th style={th}>Segment</th><th style={th}>Behind</th><th style={{ ...th, textAlign: "right" }}>Owed</th></tr></thead>
+            <tbody>
+              {owed.map(({ c, owed: o }) => (
+                <tr key={c.id} onClick={() => onOpen(c.id)} style={{ cursor: "pointer" }} title="Open client">
+                  <td style={{ ...td, fontWeight: 600 }}>{c.company || c.name}</td>
+                  <td style={td}>{SEGMENTS[c.segment]?.label || c.segment}</td>
+                  <td style={td}>{arrearsPeriods(c)} period{arrearsPeriods(c) === 1 ? "" : "s"}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: MONO, fontWeight: 600, color: C.red }}>{money(totalOwed(c), c.currency || cur)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      {/* AR ageing — live from ChargeOver, loaded on demand */}
+      <section style={panel}>
+        <div className="flex items-center" style={{ gap: 10, marginBottom: 8 }}>
+          <div style={{ ...h2, marginBottom: 0, flex: 1 }}>Invoice ageing</div>
+          {arRows && <MiniBtn onClick={exportAr}>Export CSV</MiniBtn>}
+          {ar === null && <MiniBtn solid onClick={loadAr}>Load from ChargeOver</MiniBtn>}
+        </div>
+        {ar === null && <div style={{ fontSize: 12.5, color: C.sub }}>Fetches every unpaid invoice with its due date. On demand — it queries ChargeOver directly.</div>}
+        {ar === "loading" && <div style={{ fontSize: 12.5, color: C.sub }}>Fetching open invoices…</div>}
+        {ar?.error && <div style={{ fontSize: 12.5, color: C.red }}>{ar.error}</div>}
+        {arRows && (
+          <>
+            <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 12 }}>
+              {AGE_BUCKETS.map((b) => {
+                const rows = arRows.filter((r) => r.bucket.key === b.key);
+                const sum = rows.reduce((a, r) => a + r.balance, 0);
+                return <Stat key={b.key} label={b.label} value={money(sum, cur)} sub={`${rows.length} invoice${rows.length === 1 ? "" : "s"}`} accent={b.key === "current" ? C.green : b.key === "b30" ? C.amber : C.red} />;
+              })}
+            </div>
+            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+              <thead><tr><th style={th}>Client</th><th style={th}>Invoice</th><th style={th}>Due</th><th style={th}>Days over</th><th style={{ ...th, textAlign: "right" }}>Balance</th></tr></thead>
+              <tbody>
+                {arRows.slice(0, 200).map((r, i) => (
+                  <tr key={`${r.number}-${i}`} onClick={r.client ? () => onOpen(r.client.id) : undefined} style={{ cursor: r.client ? "pointer" : "default" }}>
+                    <td style={{ ...td, fontWeight: 600, color: r.client ? C.ink : C.faint }}>{r.client ? (r.client.company || r.client.name) : `CO customer ${r.customerId} — no card`}</td>
+                    <td style={{ ...td, fontFamily: MONO }}>{r.number}</td>
+                    <td style={td}>{fmtDate(r.dueDate)}</td>
+                    <td style={{ ...td, fontFamily: MONO, color: r.days > 30 ? C.red : r.days > 0 ? C.amber : C.sub }}>{r.days || "—"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: MONO, fontWeight: 600 }}>{r.currency}{r.balance.toLocaleString("en-GB", { maximumFractionDigits: 2 })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {arRows.length > 200 && <div style={{ fontSize: 10.5, color: C.faint, marginTop: 6 }}>Showing 200 of {arRows.length} — export the CSV for the full list.</div>}
+          </>
+        )}
+      </section>
     </div>
   );
 }

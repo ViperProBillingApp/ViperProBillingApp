@@ -97,8 +97,7 @@ Restore points saved as extra `kv` keys during this session:
 
 | Item | Notes |
 | --- | --- |
-| Daily digest email | Last item of the original brief; never started |
-| `PRODUCT.md`, `DESIGN.md`, `.markdownlint.json` | Uncommitted (markdown lint pass; docs/config only, no deploy needed) |
+| Daily digest email | **Done** — /api/cron/daily (06:30) snapshots KPIs + emails active staff; admins can POST it to run now. Shares lib/metrics.js with the UI |
 | MEP → Meptur | Marked for deletion on the basis that MEP Destination Business Solutions is Meptur's MICE brand — worth a human sanity check; it was an active billing client |
 | Spectra | Two cards: "Spectra" (CO 184) and "Spectra DMC" (CO 78). Believed separate accounts — confirm |
 | ChargeOver duplicates | 10 duplicate customers suppressed app-side; merge them in ChargeOver, then drop from `CO_DUPLICATE_IDS`. **Travel Excellence 264 + 253 both carried $250 balances — possible double-billing** |

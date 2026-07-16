@@ -607,6 +607,7 @@ export default function CRM({ user }) {
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
         <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
         <MenuItem icon="pricing" onClick={() => setModal("pricing")}>Pricing</MenuItem>
+        <MenuItem icon="portal" onClick={() => setModal("viper")}>Viper Customers</MenuItem>
         <MenuItem icon="onboarding" onClick={() => setModal("onboarding")}>Maritz Onboarding</MenuItem>
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
@@ -694,6 +695,7 @@ export default function CRM({ user }) {
       {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} user={user} /></Modal>}
       {modal === "onboarding" && <Modal wide title="Maritz Onboarding — adding a new office" onClose={() => setModal(null)}><MaritzOnboarding /></Modal>}
       {modal === "pricing" && <Modal wide title="Pricing" onClose={() => setModal(null)}><PricingPanel settings={settings} onSave={setSettings} /></Modal>}
+      {modal === "viper" && <Modal wide title="Viper Customers — portal logins" onClose={() => setModal(null)}><ViperCustomers clients={clients} onSync={(id, patch) => updateWithLog(id, patch, "portal", "Viper portal login updated from Viper Customers")} /></Modal>}
       {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
@@ -717,6 +719,7 @@ function MenuIcon({ name, color }) {
     case "signout": return <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>;
     case "onboarding": return <svg {...p}><path d="M9 2h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2V3a1 1 0 0 1 1-1z" /><path d="M9 12l2 2 4-4" /></svg>;
     case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill={color} stroke="none" /></svg>;
+    case "portal": return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M7 6.5h.01" /><path d="M8 14h5" /></svg>;
     default: return null;
   }
 }
@@ -3434,6 +3437,132 @@ function EmailTemplatesPanel({ settings, onSave, user }) {
           );
         })}
       </div>
+    </div>
+  );
+}
+
+// Small square copy-to-clipboard button used in the Viper grid.
+function CopyIcon({ value, title }) {
+  const [ok, setOk] = useState(false);
+  const copy = () => { if (!value) return; navigator.clipboard?.writeText(value).then(() => { setOk(true); setTimeout(() => setOk(false), 1200); }); };
+  return (
+    <button type="button" onClick={copy} title={title || "Copy"} aria-label={title || "Copy"} disabled={!value}
+      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: ok ? C.greenBg : C.panel, color: ok ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      {ok ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+          : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
+    </button>
+  );
+}
+
+// Viper portal logins — inline-editable grid inside the modal. Every field
+// autosaves on blur (PATCH); links open in a new tab; passwords/URLs have copy
+// buttons. Passwords are encrypted at rest server-side (lib/crypto).
+// Edits also propagate onto the matching client card's Portal tab (onSync),
+// matched by portal-URL host first, company name second.
+const hostOf = (u) => { try { return new URL(u).host.toLowerCase(); } catch { return ""; } };
+const normName = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+function ViperCustomers({ clients = [], onSync }) {
+  const [rows, setRows] = useState(null);
+  const [q, setQ] = useState("");
+  const [note, setNote] = useState("");
+
+  // Push this row's login details onto matching client card(s) via the normal
+  // card-save pipeline (diff save + encryption + audit) — no second write path.
+  const syncToCards = (cust) => {
+    if (!onSync) return;
+    const h = hostOf(cust.portalUrl);
+    let m = h ? clients.filter((c) => hostOf(c.portalUrl) === h) : [];
+    if (!m.length) { const n = normName(cust.name); m = n ? clients.filter((c) => normName(c.company || c.name) === n) : []; }
+    const patch = {};
+    if (cust.portalUrl) patch.portalUrl = cust.portalUrl;
+    if (cust.adminUrl) patch.adminUrl = cust.adminUrl;
+    if (cust.adminUser) patch.adminUser = cust.adminUser;
+    if (cust.adminPw) patch.adminPassword = cust.adminPw;
+    if (!m.length || !Object.keys(patch).length) return;
+    m.forEach((c) => onSync(c.id, patch));
+    setNote(`Updated ${m.length} client card${m.length > 1 ? "s" : ""} (${m.map((c) => c.company || c.name).join(", ")})`);
+    setTimeout(() => setNote(""), 3500);
+  };
+
+  useEffect(() => {
+    fetch("/api/viper-customers").then((r) => r.json()).then((d) => setRows(d.customers || [])).catch(() => setRows([]));
+  }, []);
+
+  const add = async (body = { name: "New customer" }) => {
+    const r = await fetch("/api/viper-customers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.customer) {
+      setRows((p) => [...p, d.customer].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())));
+      if (d.customer.portalUrl || d.customer.adminUrl) syncToCards(d.customer);
+    }
+    return d.customer;
+  };
+  const patch = (id, field, value) => {
+    setRows((p) => p.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  };
+  const save = (id, field, value) => {
+    fetch(`/api/viper-customers/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [field]: value }) });
+    const row = rows.find((c) => c.id === id);
+    if (row) syncToCards({ ...row, [field]: value });
+  };
+  const remove = async (id) => {
+    if (!confirm("Remove this customer?")) return;
+    setRows((p) => p.filter((c) => c.id !== id));
+    fetch(`/api/viper-customers/${id}`, { method: "DELETE" });
+  };
+  if (rows === null) return <div style={{ padding: 20, fontSize: 13, color: C.sub }}>Loading…</div>;
+
+  const k = q.trim().toLowerCase();
+  const shown = k ? rows.filter((c) => [c.name, c.portalUrl, c.adminUrl, c.adminUser].some((v) => (v || "").toLowerCase().includes(k))) : rows;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search customers"
+          style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 200 }} />
+        <div className="flex items-center" style={{ gap: 8 }}>
+          {note && <span style={{ fontSize: 12, fontWeight: 600, color: C.green }}>✓ {note}</span>}
+          <span style={{ fontSize: 12, color: C.faint }}>{shown.length} of {rows.length}</span>
+          <MiniBtn solid onClick={() => add()}>+ Add customer</MiniBtn>
+        </div>
+      </div>
+
+      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 10 }}>
+        <div style={{ minWidth: 900 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.9fr 1.9fr 1fr 1.2fr 34px", gap: 8, padding: "8px 12px", background: C.lineSoft, fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.02em", textTransform: "uppercase", position: "sticky", top: 0 }}>
+            <span>Client name</span><span>Portal URL</span><span>Admin URL</span><span>Admin user</span><span>Admin password</span><span />
+          </div>
+          {shown.map((c) => <ViperRow key={c.id} c={c} onChange={patch} onSave={save} onRemove={remove} />)}
+          {shown.length === 0 && <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: C.faint }}>{rows.length === 0 ? "No customers yet — add one to get started." : `No match for “${q.trim()}”.`}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ViperRow({ c, onChange, onSave, onRemove }) {
+  const cell = { fontSize: 12.5, padding: "6px 8px", borderRadius: 7, border: `1px solid ${C.line}`, background: C.panel, outline: "none", width: "100%", boxSizing: "border-box", color: C.ink };
+  const link = (url) => url && (
+    <a href={url} target="_blank" rel="noopener noreferrer" title="Open in new tab"
+      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.action, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><path d="M15 3h6v6M10 14L21 3" /></svg>
+    </a>
+  );
+  const F = (field, mono) => (
+    <input value={c[field] || ""} onChange={(e) => onChange(c.id, field, e.target.value)} onBlur={(e) => onSave(c.id, field, e.target.value)}
+      style={{ ...cell, ...(mono ? { fontFamily: MONO, fontSize: 12 } : {}) }} />
+  );
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.9fr 1.9fr 1fr 1.2fr 34px", gap: 8, padding: "7px 12px", alignItems: "center", borderTop: `1px solid ${C.lineSoft}` }}>
+      {F("name")}
+      <div className="flex items-center" style={{ gap: 5 }}>{F("portalUrl", true)}<CopyIcon value={c.portalUrl} title="Copy portal URL" />{link(c.portalUrl)}</div>
+      <div className="flex items-center" style={{ gap: 5 }}>{F("adminUrl", true)}<CopyIcon value={c.adminUrl} title="Copy admin URL" />{link(c.adminUrl)}</div>
+      {F("adminUser", true)}
+      <div className="flex items-center" style={{ gap: 5 }}>{F("adminPw", true)}<CopyIcon value={c.adminPw} title="Copy password" /></div>
+      <button type="button" onClick={() => onRemove(c.id)} title="Remove" aria-label="Remove customer"
+        style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.red, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
+      </button>
     </div>
   );
 }

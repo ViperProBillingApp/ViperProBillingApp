@@ -2228,7 +2228,10 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
   }, [inv.invoices, client.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
+    // Backdrops close on a press that STARTS on them — not onClick, which also
+    // fires when a text-selection drag from inside ends past the panel edge
+    // (the "abrupt close while selecting" bug). Same fix in confirm + Modal.
+    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px", gap: 12 }}>
@@ -2535,7 +2538,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           </div>
           {/* Centered confirm — a small dialog so it's never cut off at the drawer's foot */}
           {confirmDelete && (
-            <div onClick={() => setConfirmDelete(false)} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.5)", zIndex: 60, padding: 16 }}>
+            <div onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmDelete(false); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.5)", zIndex: 60, padding: 16 }}>
               <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 14, padding: "20px 22px", width: "100%", maxWidth: 380, boxShadow: "0 24px 60px rgba(34,48,76,0.32)" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, marginBottom: 6 }}>Delete permanently?</div>
                 <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5, marginBottom: 18 }}>
@@ -3569,7 +3572,7 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
 
 function Modal({ title, onClose, children, wide }) {
   return (
-    <div onClick={onClose} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
+    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}` }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY }}>{title}</h2>

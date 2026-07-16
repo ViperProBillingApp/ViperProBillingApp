@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
+import { mirrorClients } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
@@ -20,6 +21,7 @@ async function runSync() {
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify(next)]
   );
+  await mirrorClients(db, next.clients); // F-08 dark shadow
   return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining };
 }
 

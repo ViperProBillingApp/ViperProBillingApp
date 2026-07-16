@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser } from "../../../lib/auth.js";
 import { writeAudit } from "../../../lib/security.js";
+import { mirrorClients } from "../../../lib/clients.js";
 
 // Whole-state blob with a revision guard: every write bumps `rev`, and a PUT
 // carrying an older rev is rejected (409) instead of silently clobbering newer
@@ -43,6 +44,7 @@ export async function PUT(req) {
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify({ clients: body.clients, settings: body.settings || {}, rev })]
   );
+  await mirrorClients(db, body.clients); // F-08 dark shadow — best-effort, never blocks the save
   if (prevCount - newCount >= 5) {
     await writeAudit({ actorId: user.id, actorEmail: user.email, action: "state.bulk_drop", detail: `clients ${prevCount} → ${newCount} (rev ${rev})`, req });
   }

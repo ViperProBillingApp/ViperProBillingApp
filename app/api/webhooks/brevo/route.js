@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
+import { mirrorClients } from "../../../../lib/clients.js";
 
 // Brevo transactional event webhook → flag the matching client's email as bad.
 // Public, unauthenticated route by nature — guarded by a shared secret Brevo
@@ -50,6 +51,7 @@ export async function POST(req) {
   if (matched) {
     state.rev = (state.rev || 0) + 1; // open tabs must reload before saving over this
     await db.query("UPDATE kv SET value = $1 WHERE key = 'state'", [JSON.stringify(state)]);
+    await mirrorClients(db, state.clients); // F-08 dark shadow
   }
   return NextResponse.json({ ok: true, event, matched });
 }

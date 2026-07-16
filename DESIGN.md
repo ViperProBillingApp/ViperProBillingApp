@@ -7,7 +7,7 @@ Visual system for the ViperPro Client CRM. Source of truth for tokens: `lib/bran
 Core: Slate 700 `#58585A` (body text) · Blue 400 `#98B6E0` (brand periwinkle — logo 'er', accents, key highlights).
 
 | Token | Value | Use |
-|---|---|---|
+| --- | --- | --- |
 | `paper` | `#EEF2F8` | App background (cool blue-tinted, light and airy) |
 | `panel` | `#FFFFFF` | Cards, tables, inputs |
 | `ink` | `#26262A` | Headings, primary text |
@@ -24,7 +24,7 @@ Blue/grey scale steps are derived from the two core colours — exact steps live
 ## Typography
 
 | Role | Face | Use |
-|---|---|---|
+| --- | --- | --- |
 | Display | Jost (400–700) | Wordmark, page/card titles, primary buttons |
 | Body/UI | Hanken Grotesk (400–800) | Everything else |
 | Data/Mono | IBM Plex Mono (400–600) | Money, dates, counts, emails, IDs |

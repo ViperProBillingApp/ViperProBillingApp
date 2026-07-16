@@ -14,7 +14,7 @@ Track clients across four independent axes (segment, billing status, workflow st
 
 ## Brand Personality
 
-Per the official ViperPro brand system (Edition 01 · 2026): trustworthy, calm, organized, efficient — never flashy. Voice: "Plain. Confident. Calm." Sentence case body copy, product-as-subject, no exclamation marks, no hype words, no emoji. All outbound letters are signed "Best, ViperPro Accounting Team" and sent from accounting@vipeventresources.com.
+Per the official ViperPro brand system (Edition 01 · 2026): trustworthy, calm, organized, efficient — never flashy. Voice: "Plain. Confident. Calm." Sentence case body copy, product-as-subject, no exclamation marks, no hype words, no emoji. All outbound letters are signed "Best, ViperPro Accounting Team" and sent from <accounting@vipeventresources.com>.
 
 ## Anti-references
 

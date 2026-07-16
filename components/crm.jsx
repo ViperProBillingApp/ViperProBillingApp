@@ -608,12 +608,14 @@ export default function CRM({ user }) {
             </header>
             <StatStrip clients={active} settings={settings} bounced={bounced.length} />
           </div>
-          {/* Tab row — actions live on the same line, right-aligned */}
-          <nav className="flex items-end" style={{ gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
+          {/* Tab row — actions live on the same line, right-aligned. Inline
+              display so the right-alignment holds even if the .flex utility
+              class isn't emitted by the CSS build. */}
+          <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
             {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"], ["reports", "Reports"]].map(([k, t]) => (
               <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
-            <div className="flex items-center" style={{ gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
+            <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
               <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
               <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
@@ -976,7 +978,7 @@ function StatStrip({ clients, settings, bounced }) {
     return { ...k, owedStr, total: k.totalClients };
   }, [clients, settings.currency]);
   return (
-    <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
+    <section className="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
       <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
       <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} />
       <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} />

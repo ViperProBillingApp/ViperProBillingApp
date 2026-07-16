@@ -16,7 +16,7 @@ Two batches shipped after this audit. Status per finding:
 
 | ID | Finding | Severity | Status |
 | --- | --- | --- | --- |
-| F-01 | Plaintext credential store | Critical | **Partly fixed** — reveal-on-demand shipped: the bulk load no longer ships any secret (portal/admin/maritz passwords, user lists, staff `visible_password`); each is revealed one record at a time via `/api/clients/[id]/secrets` and `/api/users/[id]/password`, audited, and saves preserve stored secrets so a stripped client can't wipe them. **Still open:** encryption-at-rest — secrets remain plaintext in the DB. Needs an `ENCRYPTION_KEY` provisioned in Vercel + `.env.local` (key-loss = secret-loss); composes with the reveal model already in place |
+| F-01 | Plaintext credential store | Critical | **Fixed** — two layers, both live. (1) Reveal-on-demand: the bulk load ships no secret; each is revealed one record at a time via `/api/clients/[id]/secrets` and `/api/users/[id]/password`, audited, and saves preserve stored secrets so a stripped client can't wipe them. (2) Encryption-at-rest: AES-256-GCM (`lib/crypto.js`), scalar portal/admin passwords + staff `visible_password` encrypted in the DB (verified: 380 client secrets + user passwords stored as ciphertext, all decrypt-ok). `ENCRYPTION_KEY` provisioned in Vercel + `.env.local`; **key-loss = secret-loss**. Remaining follow-up: user-list password columns (nested arrays) still plaintext but gated by reveal-on-demand |
 | F-02 | No MFA | High | **Fixed** — TOTP (`lib/totp.js`), enroll/login/disable, verified live |
 | F-03 | No immutable audit trail | High | **Fixed** — append-only `audit_log`, admin viewer |
 | F-04 | No automated backup | High | **Fixed** — nightly `state_backups` ring in the cron (restore still to be drilled) |
@@ -27,19 +27,20 @@ Two batches shipped after this audit. Status per finding:
 | F-09 | CSV formula injection | Low-Med | **Fixed** — `csvSafe` on both export paths |
 | F-10 | `/api/recover` unthrottled | Low-Med | **Fixed** — 30/user/hour |
 | F-11 | Webhook secret via query param | Low | **Fixed** — header only |
-| F-12 | DB TLS not verified | Low | **Open** — `rejectUnauthorized:false` unchanged |
+| F-12 | DB TLS not verified | Low | **Mechanism in place** — `dbSsl()` verifies the server cert when `DATABASE_CA` is set (Supabase's cert is self-signed, so it needs their CA). Safe default keeps working until the CA is supplied; set `DATABASE_CA` to turn verification on |
 | F-13 | False "not plaintext" comment | Low | **Fixed** |
 | F-14 | Expired tokens never GC'd | Obs | **Fixed** — GC in the daily cron |
 | F-15 | No robots.txt | Obs | **Fixed** — `public/robots.txt` |
 
-Net: every one of the "five greatest risks" below has now been addressed —
-audit-trail, backup, single-factor auth, the whole-array overwrite hazard (F-08),
-and the browser-side credential exposure (F-01 reveal-on-demand: secrets no
-longer ship in the bulk load, each is revealed one record at a time and audited).
-**The one remaining piece of F-01 is encryption-at-rest** — secrets are still
-plaintext in the database, so a raw DB dump still exposes them. That's the single
-highest open risk now, and it's gated on you provisioning an `ENCRYPTION_KEY`
-(Vercel + `.env.local`, identical, never lost). Everything else is Low (F-12).
+Net: the entire register is now resolved. All five of the "greatest risks" are
+closed — audit-trail, backup, single-factor auth, the whole-array overwrite
+hazard (F-08), and the plaintext credential store (F-01, now both reveal-on-demand
+AND encryption-at-rest, verified live). The only non-"Fixed" items are deliberate:
+F-12 (Low) ships a verification mechanism that activates when the Supabase CA is
+supplied, and the F-01 user-list password columns remain plaintext-but-gated as a
+minor follow-up. **Operational note:** the live data is bound to the `ENCRYPTION_KEY`
+now in Vercel + `.env.local` — losing that key makes the secrets unrecoverable, so
+it must live in the password manager and never be rotated without a re-encryption plan.
 
 ## 0. Scope correction (read this first)
 

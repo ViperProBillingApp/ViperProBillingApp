@@ -17,6 +17,7 @@ import UsersAdmin from "./users-admin.jsx";
 const SEGMENTS = {
   "viper-current": { label: "Viper Customer", color: "#0E766E" },
   "viper-past": { label: "Past Viper Customer", color: "#8A94A6" },
+  "viper-maritz": { label: "Viper & Maritz Customer", color: "#7A5AA6" }, // Viper customer with free Maritz portal — only viper pricing applies
   "maritz-portal": { label: "Maritz - Viper Portal", color: "#3B5BA5" },
 };
 const BILLING = {
@@ -650,7 +651,7 @@ export default function CRM({ user }) {
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId}
-        onAddClient={(rec) => setClients((p) => [...p, normalise(rec)])} />}
+        onEmail={openCompose} onAddClient={(rec) => setClients((p) => [...p, normalise(rec)])} />}
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
         officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
@@ -914,15 +915,16 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         </div>
       </Field>
       <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
-      <Field label="Message"><textarea rows={11} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.5, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      <Field label="Message"><textarea rows={8} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       {/* Sender's signature — appended automatically by the send route */}
       {signatureImage ? (
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 5 }}>Signature · added to the bottom automatically</div>
-          <img src={signatureImage} alt="your email signature" style={{ maxWidth: 260, maxHeight: 72, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 4 }} />
+        <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, flexShrink: 0 }}>Signature ·</span>
+          <img src={signatureImage} alt="your email signature" style={{ maxHeight: 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
+          <span style={{ fontSize: 11, color: C.faint }}>added automatically</span>
         </div>
       ) : (
-        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 12 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
+        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 10 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
       )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
         <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer" }}>
@@ -1340,7 +1342,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
     if (stage !== "all") l = l.filter((c) => c.stage === stage);
     if (co !== "all") l = l.filter((c) => (co === "yes" ? !!c.inChargeOver : !c.inChargeOver));
     if (mp !== "all") l = l.filter((c) => (mp === "yes" ? !!c.maritzPortal : !c.maritzPortal));
-    if (vc !== "all") l = l.filter((c) => (vc === "yes" ? !!c.viperCustomer : !c.viperCustomer));
+    if (vc !== "all") l = l.filter((c) => (vc === "past" ? c.segment === "viper-past" : vc === "yes" ? !!c.viperCustomer : !c.viperCustomer));
     if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0));
     if (q.trim()) {
       const k = q.toLowerCase();
@@ -1377,7 +1379,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           <HeaderFilter label="Stage" value={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Maritz Portal" value={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"], ["past", "Past Viper Customer"]]} />
           <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
@@ -1396,7 +1398,9 @@ function WorkflowTab({ clients, onOpen, onStage, onUpdate }) {
   const [showHidden, setShowHidden] = useState(false);
   const [dragOverStage, setDragOverStage] = useState(null);
   const hiddenCount = clients.filter((c) => c.workflowHidden).length;
-  const visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden));
+  // Offices covered by a group are represented by the group's master card only —
+  // don't show a separate workflow card for each office.
+  const visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
 
   const drop = (e, stage) => {
     e.preventDefault();
@@ -1859,7 +1863,8 @@ function PastCharges({ client, state }) {
 // all work. Editing a secret keeps the local copy in sync so the hydrated view
 // reflects it; the server preserves stored secrets on save regardless.
 const SECRET_FIELDS = ["portalPassword", "adminPassword", "maritzPortalPassword", "maritzAdminPassword", "maritzUserLists", "userLists"];
-function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onAddClient, currentUser }) {
+function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onEmail, onAddClient, currentUser }) {
+  const drawerTemplates = getTemplates(settings);
   const [secrets, setSecrets] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -1994,6 +1999,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
               </select>
               <span style={{ fontSize: 11, color: SEGMENTS[client.segment].color, pointerEvents: "none" }}>▾</span>
             </span>
+            {onEmail && <EmailIconMenu client={client} templates={drawerTemplates} onPick={(type) => onEmail(client.id, type)} />}
             <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
           </div>
         </div>
@@ -2171,7 +2177,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
 
           {/* Pricing section follows the SEGMENT (top-right dropdown), not the
               relationship flags — many cards are both Maritz and Viper. */}
-          {["viper-current", "viper-past"].includes(client.segment) && (
+          {["viper-current", "viper-past", "viper-maritz"].includes(client.segment) && (
             <ViperSubscription client={client} settings={settings} onUpdateSettings={onUpdateSettings} onUpdate={set} />
           )}
 
@@ -2253,16 +2259,23 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
               style={footBtn(client.formerCustomer ? null : C.red)}>
               {client.formerCustomer ? "↩ Reinstate customer" : "No longer a customer"}
             </button>
-            {!confirmDelete ? (
-              <button onClick={() => setConfirmDelete(true)} style={footBtn(C.red)}>Delete permanently…</button>
-            ) : (
-              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: C.red }}>This can't be undone — Archive is reversible.</span>
-                <button onClick={() => onDelete(client.id)} style={{ ...footBtn(C.red), background: C.red, color: "#fff", border: "none" }}>Confirm delete</button>
-                <button onClick={() => setConfirmDelete(false)} style={footBtn()}>Cancel</button>
-              </div>
-            )}
+            <button onClick={() => setConfirmDelete(true)} style={footBtn(C.red)}>Delete permanently…</button>
           </div>
+          {/* Centered confirm — a small dialog so it's never cut off at the drawer's foot */}
+          {confirmDelete && (
+            <div onClick={() => setConfirmDelete(false)} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.5)", zIndex: 60, padding: 16 }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 14, padding: "20px 22px", width: "100%", maxWidth: 380, boxShadow: "0 24px 60px rgba(34,48,76,0.32)" }}>
+                <div style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, marginBottom: 6 }}>Delete permanently?</div>
+                <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5, marginBottom: 18 }}>
+                  <strong style={{ color: C.ink }}>{client.company || client.name}</strong> will be removed for good. This can't be undone — Archive is the reversible option.
+                </div>
+                <div className="flex items-center justify-end" style={{ gap: 8 }}>
+                  <button onClick={() => setConfirmDelete(false)} style={footBtn()}>Cancel</button>
+                  <button onClick={() => onDelete(client.id)} style={{ ...footBtn(C.red), background: C.red, color: "#fff", border: "none" }}>Delete permanently</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

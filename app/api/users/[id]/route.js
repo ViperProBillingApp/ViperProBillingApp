@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser, destroyUserSessions, hashPassword } from "../../../../lib/auth.js";
 import { writeAudit } from "../../../../lib/security.js";
+import { encStr } from "../../../../lib/crypto.js";
 
 async function requireAdmin() {
   const me = await getSessionUser();
@@ -39,7 +40,7 @@ export async function PATCH(req, { params }) {
   }
   if (body.password !== undefined && body.password !== "") {
     if (String(body.password).length < 8) return NextResponse.json({ error: "Password must be at least 8 characters." }, { status: 400 });
-    await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(String(body.password)), String(body.password), userId]);
+    await db.query("UPDATE users SET hash = $1, visible_password = $2 WHERE id = $3", [hashPassword(String(body.password)), encStr(String(body.password)), userId]);
     if (userId !== me.id) await destroyUserSessions(userId); // new password = their old sessions end
     await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.password_reset", entity: "user", entityId: String(userId), req });
   }

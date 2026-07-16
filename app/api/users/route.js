@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser, hashPassword, generatePassword } from "../../../lib/auth.js";
 import { writeAudit } from "../../../lib/security.js";
+import { encStr } from "../../../lib/crypto.js";
 
 async function requireAdmin() {
   const me = await getSessionUser();
@@ -39,7 +40,7 @@ export async function POST(req) {
   try {
     const { rows } = await db.query(
       "INSERT INTO users (email, name, hash, role, visible_password) VALUES ($1, $2, $3, $4, $5) RETURNING id",
-      [email, String(body.name || "").trim(), hashPassword(password), role, password]
+      [email, String(body.name || "").trim(), hashPassword(password), role, encStr(password)]
     );
     await writeAudit({ actorId: me.id, actorEmail: me.email, action: "user.create", entity: "user", entityId: String(rows[0].id), detail: `${email} (${role})`, req });
     return NextResponse.json({

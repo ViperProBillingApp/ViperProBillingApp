@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
-import { mirrorClients, readState } from "../../../../lib/clients.js";
+import { mirrorClients, readState, encryptClients } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
@@ -15,7 +15,7 @@ async function runSync() {
   const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer), overdue);
   const { filled, remaining } = await backfillRecurringAmounts(clients);
   // bump the rev so open tabs holding pre-sync state can't clobber the sync
-  const next = { clients, settings: state.settings || {}, rev: (state.rev || 0) + 1 };
+  const next = { clients: encryptClients(clients), settings: state.settings || {}, rev: (state.rev || 0) + 1 }; // F-01: encrypt at rest
   await db.query(
     "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
     [JSON.stringify(next)]

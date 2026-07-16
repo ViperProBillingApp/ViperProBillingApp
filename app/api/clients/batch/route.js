@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { writeAudit } from "../../../../lib/security.js";
-import { mirrorClients, mergeClientSecrets } from "../../../../lib/clients.js";
+import { mirrorClients, mergeClientSecrets, encryptClients } from "../../../../lib/clients.js";
 
 // F-08 Phase 2: per-client-diff save. The client sends only the clients it
 // CHANGED (upserts) and REMOVED (deletes) — never the whole array — so a stale
@@ -37,7 +37,7 @@ export async function PUT(req) {
   const map = new Map((state.clients || []).map((c) => [c.id, c]));
   for (const c of upserts) map.set(c.id, mergeClientSecrets(map.get(c.id), c));
   for (const id of deletes) map.delete(id);
-  const newClients = [...map.values()];
+  const newClients = encryptClients([...map.values()]); // F-01: encrypt secrets at rest (dormant until keyed)
   const nextRev = curRev + 1;
   const newVal = JSON.stringify({ clients: newClients, settings: body.settings !== undefined ? body.settings : (state.settings || {}), rev: nextRev });
 

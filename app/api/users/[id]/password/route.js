@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../../lib/db.js";
 import { getSessionUser } from "../../../../../lib/auth.js";
 import { writeAudit } from "../../../../../lib/security.js";
+import { decStr } from "../../../../../lib/crypto.js";
 
 // F-01: admin reveals ONE staff member's stored password on demand (not shipped
 // in the users list). Audited.
@@ -14,5 +15,5 @@ export async function GET(req, { params }) {
   const { rows } = await db.query("SELECT email, visible_password FROM users WHERE id = $1", [Number(id)]);
   if (!rows[0]) return NextResponse.json({ error: "User not found" }, { status: 404 });
   await writeAudit({ actorId: me.id, actorEmail: me.email, action: "password.revealed", entity: "user", entityId: String(id), detail: rows[0].email, req });
-  return NextResponse.json({ visible_password: rows[0].visible_password || null });
+  return NextResponse.json({ visible_password: rows[0].visible_password ? decStr(rows[0].visible_password) : null });
 }

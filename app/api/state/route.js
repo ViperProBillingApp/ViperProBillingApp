@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser } from "../../../lib/auth.js";
 import { writeAudit } from "../../../lib/security.js";
-import { mirrorClients, readState, stripSecrets, mergeClientSecrets } from "../../../lib/clients.js";
+import { mirrorClients, readState, stripSecrets, mergeClientSecrets, encryptClients } from "../../../lib/clients.js";
 
 // Whole-state blob with a revision guard: every write bumps `rev`, and a PUT
 // carrying an older rev is rejected (409) instead of silently clobbering newer
@@ -39,7 +39,7 @@ export async function PUT(req) {
   // F-01: preserve stored secrets when this (possibly stripped) save has them
   // blank, so a save can't wipe portal passwords / user lists.
   const storedById = new Map((JSON.parse(rows[0]?.value || '{"clients":[]}').clients || []).map((c) => [c.id, c]));
-  const clients = body.clients.map((c) => mergeClientSecrets(storedById.get(c.id), c));
+  const clients = encryptClients(body.clients.map((c) => mergeClientSecrets(storedById.get(c.id), c))); // F-01: encrypt at rest
   // Flag a sharp drop in client count — the exact shape of the two historical
   // stale-tab overwrites. Doesn't block (can't tell a real bulk delete from a
   // clobber), but leaves an audit breadcrumb naming who saved it.

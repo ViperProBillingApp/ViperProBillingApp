@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { writeAudit } from "../../../../lib/security.js";
-import { mirrorClients } from "../../../../lib/clients.js";
+import { mirrorClients, mergeClientSecrets } from "../../../../lib/clients.js";
 
 // F-08 Phase 2: per-client-diff save. The client sends only the clients it
 // CHANGED (upserts) and REMOVED (deletes) — never the whole array — so a stale
@@ -33,8 +33,9 @@ export async function PUT(req) {
   }
 
   // Merge the diff into current server clients, preserving order.
+  // F-01: keep stored secrets when the incoming (stripped) client has them blank.
   const map = new Map((state.clients || []).map((c) => [c.id, c]));
-  for (const c of upserts) map.set(c.id, c);
+  for (const c of upserts) map.set(c.id, mergeClientSecrets(map.get(c.id), c));
   for (const id of deletes) map.delete(id);
   const newClients = [...map.values()];
   const nextRev = curRev + 1;

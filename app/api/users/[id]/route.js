@@ -60,7 +60,7 @@ export async function PATCH(req, { params }) {
       await db.query(`UPDATE users SET ${k} = $1 WHERE id = $2`, [body[k] || null, userId]);
     }
   }
-  const { rows } = await db.query("SELECT id, email, name, role, active, created_at, visible_password, headshot, signature_image FROM users WHERE id = $1", [userId]);
+  const { rows } = await db.query("SELECT id, email, name, role, active, created_at, (visible_password IS NOT NULL AND visible_password <> '') AS has_password, headshot, signature_image FROM users WHERE id = $1", [userId]);
   return NextResponse.json({ user: rows[0] });
 }
 

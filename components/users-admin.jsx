@@ -218,7 +218,18 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
   const [editing, setEditing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showPw, setShowPw] = useState(false);
+  const [revealed, setRevealed] = useState(null); // fetched on demand (F-01)
   const [f, setF] = useState({ name: u.name, email: u.email, password: "" });
+  // F-01: passwords aren't shipped in the users list — reveal one on demand, audited.
+  const toggleReveal = async () => {
+    if (showPw) { setShowPw(false); return; }
+    if (revealed === null) {
+      const d = await onCall(`/api/users/${u.id}/password`, "GET");
+      if (!d) return;
+      setRevealed(d.visible_password || "");
+    }
+    setShowPw(true);
+  };
 
   const smallBtn = {
     fontSize: 12.5, fontWeight: 600, padding: "7px 12px", borderRadius: 8,
@@ -269,12 +280,12 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, fontSize: 12.5, minHeight: 22 }}>
         <span style={{ color: C.sub, fontWeight: 600 }}>Password</span>
-        {u.visible_password ? (
+        {u.has_password ? (
           <>
             <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}`, letterSpacing: showPw ? 0 : 2 }}>
-              {showPw ? u.visible_password : "••••••••"}
+              {showPw ? revealed : "••••••••"}
             </code>
-            <button onClick={() => setShowPw((v) => !v)} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
+            <button onClick={toggleReveal} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
               {showPw ? "Hide" : "Show"}
             </button>
           </>
@@ -469,22 +480,29 @@ function AuditLog({ onCall }) {
 }
 
 function ChangePassword({ onCall, onDone }) {
-  const [current, setCurrent] = useState(null); // live visible_password (or null if unknown)
+  const [hasPw, setHasPw] = useState(false);
+  const [current, setCurrent] = useState(null); // fetched on demand (F-01)
   const [showCur, setShowCur] = useState(false);
   const [next, setNext] = useState("");
-  const load = async () => { const d = await onCall("/api/users/me", "GET"); if (d) setCurrent(d.user.visible_password); };
+  const load = async () => { const d = await onCall("/api/users/me", "GET"); if (d) { setHasPw(!!d.user.has_password); setCurrent(null); setShowCur(false); } };
   useEffect(() => { load(); }, []);
+  // F-01: own password revealed on demand, audited — not shipped with /me.
+  const toggleCur = async () => {
+    if (showCur) { setShowCur(false); return; }
+    if (current === null) { const d = await onCall("/api/users/me/password", "GET"); if (!d) return; setCurrent(d.visible_password || ""); }
+    setShowCur(true);
+  };
   return (
     <Card title="Change my password">
       <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
         <Field label="Current password">
           <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 38 }}>
-            {current ? (
+            {hasPw ? (
               <>
                 <code style={{ fontFamily: MONO, fontWeight: 600, fontSize: 13, background: C.panel, padding: "7px 10px", borderRadius: 8, border: `1px solid ${C.line}`, letterSpacing: showCur ? 0 : 2 }}>
                   {showCur ? current : "••••••••"}
                 </code>
-                <button onClick={() => setShowCur((v) => !v)} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: 0 }}>
+                <button onClick={toggleCur} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: 0 }}>
                   {showCur ? "Hide" : "Show"}
                 </button>
               </>

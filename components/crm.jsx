@@ -1854,8 +1854,26 @@ function PastCharges({ client, state }) {
   );
 }
 
-function DetailDrawer({ client, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onAddClient, currentUser }) {
-  const set = (patch) => onUpdate(client.id, patch);
+// F-01: secret fields aren't shipped in the bulk load — the drawer fetches them
+// on open (audited) and hydrates its client, so pricing/portal display + edits
+// all work. Editing a secret keeps the local copy in sync so the hydrated view
+// reflects it; the server preserves stored secrets on save regardless.
+const SECRET_FIELDS = ["portalPassword", "adminPassword", "maritzPortalPassword", "maritzAdminPassword", "maritzUserLists", "userLists"];
+function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdateWithLog, onRecordPayment, onDelete, onDeleteAny, onUpdateSettings, officeSiblings = [], allClients = [], onOpen, onAddClient, currentUser }) {
+  const [secrets, setSecrets] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    setSecrets(null);
+    fetch(`/api/clients/${rawClient.id}/secrets`).then((r) => r.json()).then((d) => { if (alive) setSecrets(d.secrets || {}); }).catch(() => { if (alive) setSecrets({}); });
+    return () => { alive = false; };
+  }, [rawClient.id]);
+  const client = useMemo(() => (secrets ? { ...rawClient, ...secrets } : rawClient), [rawClient, secrets]);
+  const set = (patch) => {
+    onUpdate(rawClient.id, patch);
+    const sp = {};
+    for (const k of SECRET_FIELDS) if (k in patch) sp[k] = patch[k];
+    if (Object.keys(sp).length) setSecrets((s) => ({ ...(s || {}), ...sp }));
+  };
   const [showGroup, setShowGroup] = useState(false);
   // Apply a group-offices selection: the offices become covered members and
   // billing lives on a dedicated "<Name> (Group)" master card — reused if the

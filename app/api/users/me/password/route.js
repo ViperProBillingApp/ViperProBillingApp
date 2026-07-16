@@ -3,6 +3,14 @@ import { getDb } from "../../../../../lib/db.js";
 import { getSessionUser, hashPassword } from "../../../../../lib/auth.js";
 import { writeAudit } from "../../../../../lib/security.js";
 
+// F-01: self-reveal own stored password on demand (was shipped in /me before).
+export async function GET(req) {
+  const me = await getSessionUser();
+  if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  await writeAudit({ actorId: me.id, actorEmail: me.email, action: "password.self_revealed", req });
+  return NextResponse.json({ visible_password: me.visible_password || null });
+}
+
 // No current-password check: the card shows the signed-in user their live
 // password (visible_password) instead, so re-typing it proves nothing extra.
 export async function POST(req) {

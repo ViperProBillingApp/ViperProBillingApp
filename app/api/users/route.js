@@ -14,8 +14,10 @@ export async function GET() {
   const [, err] = await requireAdmin();
   if (err) return err;
   const db = await getDb();
+  // F-01: visible_password no longer shipped in the list — has_password flags
+  // whether one exists; reveal one at a time via /api/users/[id]/password.
   const { rows } = await db.query(
-    "SELECT id, email, name, role, active, created_at, visible_password, headshot, signature_image FROM users ORDER BY created_at"
+    "SELECT id, email, name, role, active, created_at, (visible_password IS NOT NULL AND visible_password <> '') AS has_password, headshot, signature_image FROM users ORDER BY created_at"
   );
   return NextResponse.json({ users: rows });
 }

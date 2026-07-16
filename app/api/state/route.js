@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../lib/db.js";
 import { getSessionUser } from "../../../lib/auth.js";
 import { writeAudit } from "../../../lib/security.js";
-import { mirrorClients } from "../../../lib/clients.js";
+import { mirrorClients, readState } from "../../../lib/clients.js";
 
 // Whole-state blob with a revision guard: every write bumps `rev`, and a PUT
 // carrying an older rev is rejected (409) instead of silently clobbering newer
@@ -14,9 +14,9 @@ export async function GET() {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
   const db = await getDb();
-  const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
-  const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: null };
-  return NextResponse.json({ ...state, rev: state.rev || 0 });
+  // F-08 Phase 3: clients come from the per-row table; settings/rev from the blob.
+  const state = await readState(db);
+  return NextResponse.json(state);
 }
 
 export async function PUT(req) {

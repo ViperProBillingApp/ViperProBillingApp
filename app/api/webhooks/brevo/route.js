@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
-import { mirrorClients } from "../../../../lib/clients.js";
+import { mirrorClients, readState } from "../../../../lib/clients.js";
 
 // Brevo transactional event webhook → flag the matching client's email as bad.
 // Public, unauthenticated route by nature — guarded by a shared secret Brevo
@@ -33,9 +33,7 @@ export async function POST(req) {
   if (!status && !optOut) return NextResponse.json({ ok: true, ignored: event });
 
   const db = await getDb();
-  const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
-  if (!rows[0]) return NextResponse.json({ ok: true, ignored: "no state yet" });
-  const state = JSON.parse(rows[0].value);
+  const state = await readState(db); // F-08 Phase 3: clients from rows
 
   let matched = 0;
   for (const c of state.clients || []) {

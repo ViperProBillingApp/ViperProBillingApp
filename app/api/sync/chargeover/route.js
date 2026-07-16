@@ -2,15 +2,14 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
-import { mirrorClients } from "../../../../lib/clients.js";
+import { mirrorClients, readState } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
 
 async function runSync() {
   const db = await getDb();
-  const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
-  const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: {} };
+  const state = await readState(db); // F-08 Phase 3: clients from rows
   const customers = await fetchAllCustomers();
   const overdue = await fetchOverdueMap().catch(() => null); // best-effort; falls back to raw balance
   const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer), overdue);

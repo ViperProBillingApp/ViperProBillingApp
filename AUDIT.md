@@ -16,14 +16,14 @@ Two batches shipped after this audit. Status per finding:
 
 | ID | Finding | Severity | Status |
 | --- | --- | --- | --- |
-| F-01 | Plaintext credential store | Critical | **Open** — top remaining risk; pairs with F-08 Phase 2 |
+| F-01 | Plaintext credential store | Critical | **Open** — top remaining risk. The per-row read model (F-08) is now in place, so the natural fix is: the list read omits secret fields and a per-client detail fetch returns them (decrypted), instead of shipping the whole store to every browser |
 | F-02 | No MFA | High | **Fixed** — TOTP (`lib/totp.js`), enroll/login/disable, verified live |
 | F-03 | No immutable audit trail | High | **Fixed** — append-only `audit_log`, admin viewer |
 | F-04 | No automated backup | High | **Fixed** — nightly `state_backups` ring in the cron (restore still to be drilled) |
 | F-05 | No login rate-limiting | Medium | **Fixed** — DB-backed throttle on login + reset |
 | F-06 | No security headers / CSP | Medium | **Fixed** — CSP/HSTS/X-Frame etc., confirmed in prod |
 | F-07 | Long sessions, no idle timeout | Medium | **Fixed** — 3-day idle, 30-day absolute cap |
-| F-08 | Whole-state-blob architecture | Medium | **Phase 2 done** — write-side cutover: frontend saves per-client diffs to `/api/clients/batch`, server merges into current state (whole-array overwrite no longer possible). Blob still maintained as rollback net; read-side cutover + blob retirement is Phase 3 |
+| F-08 | Whole-state-blob architecture | Medium | **Phases 1–3 done** — clients live one-row-per-client; writes are per-client diffs (`/api/clients/batch`), reads come from the rows (`readState`) across app + sync + webhook + cron, original order preserved via an `ord` column. The kv blob is demoted to a written backup (homes settings/rev, rollback net). Whole-array overwrite is gone and the app no longer depends on the blob for reads. Optional future cleanup: relocate settings/rev and delete the blob outright |
 | F-09 | CSV formula injection | Low-Med | **Fixed** — `csvSafe` on both export paths |
 | F-10 | `/api/recover` unthrottled | Low-Med | **Fixed** — 30/user/hour |
 | F-11 | Webhook secret via query param | Low | **Fixed** — header only |
@@ -33,10 +33,13 @@ Two batches shipped after this audit. Status per finding:
 | F-15 | No robots.txt | Obs | **Fixed** — `public/robots.txt` |
 
 Net: the dominant risk theme has shifted. Of the "five greatest risks" below,
-audit-trail, backup, and single-factor auth are addressed; the plaintext
-credential concentration (F-01) and the browser-side blob exposure (F-08, until
-cutover) remain. **F-01 is now the single highest open risk** and is the right
-next piece of work.
+audit-trail, backup, single-factor auth, and the whole-array overwrite hazard
+are all addressed — the last via F-08 Phase 2, after which no tab can overwrite
+clients it didn't touch. What remains: the plaintext credential concentration
+(F-01), and the browser-side exposure of that store, since the load path still
+ships every client (with secrets) to the browser until F-08 Phase 3 flips reads
+to per-row. **F-01 is now the single highest open risk** and is the right next
+piece of work; it composes cleanly with Phase 3.
 
 ## 0. Scope correction (read this first)
 

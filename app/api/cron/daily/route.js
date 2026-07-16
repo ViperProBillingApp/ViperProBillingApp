@@ -4,6 +4,7 @@ import { getSessionUser } from "../../../../lib/auth.js";
 import { computeKpis, topOwed, fmtMoney, arrearsPeriods } from "../../../../lib/metrics.js";
 import { sendDigestEmail } from "../../../../lib/email.js";
 import { snapshotState, gcExpired } from "../../../../lib/security.js";
+import { readState } from "../../../../lib/clients.js";
 
 export const maxDuration = 60;
 
@@ -18,8 +19,7 @@ async function runDaily() {
   const backup = await snapshotState().catch((e) => ({ backed: false, reason: e.message }));
   await gcExpired().catch((e) => console.error("gc failed:", e.message));
 
-  const { rows } = await db.query("SELECT value FROM kv WHERE key = 'state'");
-  const state = rows[0] ? JSON.parse(rows[0].value) : { clients: [], settings: {} };
+  const state = await readState(db); // F-08 Phase 3: clients from rows
   const active = (state.clients || []).filter((c) => !c.archivedClient); // same filter the UI tabs use
   const k = computeKpis(active, state.settings || {});
 

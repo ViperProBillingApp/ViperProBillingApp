@@ -667,7 +667,7 @@ export default function CRM({ user }) {
             {/* Archived former customers still surface on the board while marked for deletion */}
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
-            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} />}
+            {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
           </>
         )}
@@ -1864,15 +1864,42 @@ function periodSent(c) {
   }
   return best;
 }
-function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage, onUpdateWithLog }) {
+// Campaign progress is derived from the send log: a send of the round's
+// template counts for the latest round whose start precedes it (rounds are
+// sequential windows), so there's no second bookkeeping to drift out of sync.
+function sentInRound(c, cp, round) {
+  if (!round) return null;
+  const next = cp.rounds[cp.rounds.indexOf(round) + 1];
+  let best = null;
+  for (const [k, v] of Object.entries(c.reminders || {})) {
+    if (!v?.sentAt || !k.startsWith(`${round.type}:`)) continue;
+    if (v.sentAt >= round.startedAt && (!next || v.sentAt < next.startedAt) && (!best || v.sentAt > best.sentAt)) best = v;
+  }
+  return best;
+}
+function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage, onUpdateWithLog, onUpdateSettings }) {
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
-  const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper
+  const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper | camp:<id>
   const [q, setQ] = useState("");
-  const [view, setView] = useState("compose"); // compose | sent
+  const [view, setView] = useState("compose"); // compose | sent | campaigns
   const [sq, setSq] = useState("");
   const [mailView, setMailView] = useState(null); // {c, mail} — popup of a sent email
   const key = `${type}:${periodKey()}`;
+
+  // ── Campaigns (Trello letter-round tracking) ─────────────────────────────
+  // A campaign = frozen member list + ordered letter rounds. Progress is
+  // DERIVED from each client's send log (c.reminders): a send counts for the
+  // latest round whose start precedes it — no second bookkeeping to drift.
+  const campaigns = settings.campaigns || [];
+  const activeCampaigns = campaigns.filter((cp) => !cp.archived);
+  const camp = aud.startsWith("camp:") ? campaigns.find((cp) => cp.id === aud.slice(5)) : null;
+  const curRound = camp ? camp.rounds[camp.rounds.length - 1] : null;
+  const saveCampaigns = (next) => onUpdateSettings?.({ campaigns: next });
+  const markCampDone = (campId, clientId) =>
+    saveCampaigns(campaigns.map((cp) => (cp.id === campId ? { ...cp, done: { ...(cp.done || {}), [clientId]: new Date().toISOString() } } : cp)));
+  // Keep the editor's template locked to the campaign's current round.
+  useEffect(() => { if (camp && curRound && templates[curRound.type]) setType(curRound.type); }, [aud]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Every sent email across all clients, newest first — the tab's sent archive.
   const sentEmails = useMemo(() =>
@@ -1890,6 +1917,17 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
 
   const [fullAudience, skipped] = useMemo(() => {
     let l;
+    if (aud.startsWith("camp:")) {
+      const cp = campaigns.find((x) => x.id === aud.slice(5));
+      if (!cp) return [[], 0];
+      const byId = new Map(clients.map((c) => [c.id, c]));
+      const r = cp.rounds[cp.rounds.length - 1];
+      l = cp.memberIds.map((id) => byId.get(id)).filter(Boolean).filter((c) => !cp.done?.[c.id]);
+      const before = l.length;
+      l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
+      l = [...l.filter((c) => !sentInRound(c, cp, r)), ...l.filter((c) => sentInRound(c, cp, r))];
+      return [l, before - l.length];
+    }
     if (aud !== "auto") {
       // Explicit audience: a billing status, or a customer group.
       l = clients.filter((c) =>
@@ -1913,7 +1951,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     l = l.filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
     l = [...l.filter((c) => !periodSent(c)), ...l.filter((c) => periodSent(c))];
     return [l, before - l.length];
-  }, [clients, type, aud, key]);
+  }, [clients, type, aud, key, campaigns]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Search narrows the visible queue by company / contact / email.
   const audience = useMemo(() => {
@@ -1923,7 +1961,9 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   }, [fullAudience, q]);
 
   useEffect(() => { setSelId(null); }, [type]);
-  const sentOf = (c) => periodSent(c)?.sentAt;
+  // Campaign audience: "sent" means sent THIS ROUND (not merely this month).
+  const sentMailOf = (c) => (camp ? sentInRound(c, camp, curRound) : periodSent(c));
+  const sentOf = (c) => sentMailOf(c)?.sentAt;
   const client = audience.find((c) => c.id === selId) || audience.find((c) => !sentOf(c)) || audience[0];
   const sentCount = fullAudience.filter(sentOf).length;
   const advance = () => {
@@ -1939,6 +1979,11 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     price: "everyone on old pricing",
     deletion: "accounts marked for deletion",
   }[type] || "all contactable clients";
+
+  if (view === "campaigns") {
+    return <CampaignsPanel campaigns={campaigns} clients={clients} templates={templates} onSave={saveCampaigns}
+      onBack={() => setView("compose")} onSendRound={(id) => { setAud(`camp:${id}`); setView("compose"); }} />;
+  }
 
   if (view === "sent") {
     const shown = sentFiltered.slice(0, 150);
@@ -1982,17 +2027,23 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         <span style={{ fontSize: 12.5, color: C.sub }}>Audience</span>
         <MiniSelect value={aud} onChange={setAud} options={[
           ["auto", `Suggested: ${audienceHint}`],
+          ...activeCampaigns.map((cp) => [`camp:${cp.id}`, `Campaign: ${cp.name}`]),
           ...Object.entries(BILLING).map(([k, v]) => [`bill:${k}`, v.label]),
           ["grp:maritz", "Maritz Portal customers"],
           ["grp:viper", "Viper Customers"],
           ["grp:multi", "Multi-office"],
         ]} />
-        <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
+        {camp && curRound ? (
+          <MiniPill fg={C.action} bg="#E7EDF8">Round {camp.rounds.length} · {curRound.label} · {templates[curRound.type]?.label || curRound.type}</MiniPill>
+        ) : (
+          <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
+        )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
           style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
-          {sentCount}/{fullAudience.length} sent this month{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
+          {sentCount}/{fullAudience.length} sent {camp ? "this round" : "this month"}{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
         </span>
+        <GhostBtn onClick={() => setView("campaigns")}>Campaigns{activeCampaigns.length ? ` (${activeCampaigns.length})` : ""}</GhostBtn>
         <GhostBtn onClick={() => setView("sent")}>Sent emails ({sentEmails.length})</GhostBtn>
       </div>
       {!client ? (
@@ -2019,8 +2070,8 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
                   <div style={{ fontSize: 11, color: sent ? C.green : C.sub, fontWeight: sent ? 600 : 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {sent ? (
                       <span role="button" tabIndex={0} title="View the email that was sent"
-                        onClick={(e) => { e.stopPropagation(); setMailView({ c, mail: periodSent(c) }); }}
-                        onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setMailView({ c, mail: periodSent(c) }); } }}
+                        onClick={(e) => { e.stopPropagation(); setMailView({ c, mail: sentMailOf(c) }); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); setMailView({ c, mail: sentMailOf(c) }); } }}
                         style={{ cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
                         Email sent · {fmtDate(sent)}
                       </span>
@@ -2039,10 +2090,11 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
                 </button>
                 {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
                 <button onClick={() => {
+                  if (camp) markCampDone(camp.id, client.id); // replied/complete — drops out of future rounds
                   onLogSent(client.id, key, { dismissedAt: new Date().toISOString() });
-                  onUpdateWithLog?.(client.id, { stage: "contacted-awaiting" }, "stage", "Done in Emails, moved to Contacted · awaiting reply");
+                  onUpdateWithLog?.(client.id, { stage: "contacted-awaiting" }, "stage", camp ? `Done in campaign "${camp.name}"` : "Done in Emails, moved to Contacted · awaiting reply");
                   advance();
-                }} title="Remove from this list and mark Contacted · awaiting reply"
+                }} title={camp ? "Mark complete for this campaign (drops out of future rounds)" : "Remove from this list and mark Contacted · awaiting reply"}
                   style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, padding: "7px 14px", borderRadius: 8, border: "none", background: C.green, color: "#fff", cursor: "pointer" }}>
                   Done ✓
                 </button>
@@ -2066,6 +2118,141 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+/* Campaigns — Trello-style letter-round tracking. A campaign freezes an
+   audience, then runs template rounds (first letter → follow-up → …) with a
+   per-round progress bar derived from the send log. Sending happens through
+   the normal compose queue (audience = the campaign). */
+function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendRound }) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const [seg, setSeg] = useState("grp:maritz");
+  const [tpl, setTpl] = useState(Object.keys(templates)[0] || "reminder");
+  const [roundFor, setRoundFor] = useState(null); // campaign id with the add-round form open
+  const [roundLabel, setRoundLabel] = useState("Follow-up letter");
+  const [roundTpl, setRoundTpl] = useState(Object.keys(templates)[0] || "reminder");
+  const byId = useMemo(() => new Map(clients.map((c) => [c.id, c])), [clients]);
+
+  const audFor = (v) => clients.filter((c) =>
+    v === "grp:maritz" ? c.maritzPortal :
+    v === "grp:viper" ? c.viperCustomer :
+    v === "grp:multi" ? c.multiOffice && (c.groupBillingMaster || c.priceMode !== "group") :
+    v.startsWith("bill:") ? c.billingStatus === v.slice(5) :
+    c.stage !== "marked-deletion")
+    .filter((c) => !c.tags.includes("opted-out") && c.emailStatus === "ok" && c.email);
+  const AUD_OPTS = [
+    ["grp:maritz", "Maritz Portal customers"], ["grp:viper", "Viper Customers"], ["grp:multi", "Multi-office"],
+    ...Object.entries(BILLING).map(([k, v]) => [`bill:${k}`, v.label]), ["all", "All contactable clients"],
+  ];
+
+  const create = () => {
+    const n = name.trim();
+    if (!n) return;
+    const members = audFor(seg).map((c) => c.id);
+    onSave([{ id: uid(), name: n, memberIds: members, done: {}, createdAt: iso(),
+      rounds: [{ id: uid(), label: "First letter", type: tpl, startedAt: new Date().toISOString() }] }, ...campaigns]);
+    setCreating(false); setName("");
+  };
+  const addRound = (cp) => {
+    const label = roundLabel.trim() || `Round ${cp.rounds.length + 1}`;
+    onSave(campaigns.map((x) => (x.id === cp.id ? { ...x, rounds: [...x.rounds, { id: uid(), label, type: roundTpl, startedAt: new Date().toISOString() }] } : x)));
+    setRoundFor(null); setRoundLabel("Follow-up letter");
+  };
+  const bar = (n, total, color) => (
+    <div style={{ flex: 1, height: 7, borderRadius: 7, background: C.lineSoft, overflow: "hidden", minWidth: 80 }}>
+      <div style={{ width: total ? `${Math.round((n / total) * 100)}%` : 0, height: "100%", background: color, transition: "width 0.3s" }} />
+    </div>
+  );
+
+  const list = [...campaigns.filter((cp) => !cp.archived), ...campaigns.filter((cp) => cp.archived)];
+  return (
+    <div>
+      <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
+        <GhostBtn onClick={onBack}>← Back to compose</GhostBtn>
+        <span style={{ fontSize: 14, fontWeight: 700, fontFamily: DISPLAY }}>Campaigns</span>
+        <span style={{ marginLeft: "auto" }} />
+        {!creating && <SolidBtn onClick={() => setCreating(true)}>+ New campaign</SolidBtn>}
+      </div>
+
+      {creating && (
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 14, maxWidth: 560 }}>
+          <Field label="Campaign name"><input style={inputStyle} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maritz mail-out — July" /></Field>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Field label={`Audience · ${audFor(seg).length} contactable`}>
+              <select style={inputStyle} value={seg} onChange={(e) => setSeg(e.target.value)}>
+                {AUD_OPTS.map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+            </Field>
+            <Field label="First letter template">
+              <select style={inputStyle} value={tpl} onChange={(e) => setTpl(e.target.value)}>
+                {Object.entries(templates).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </select>
+            </Field>
+          </div>
+          <p style={{ fontSize: 11.5, color: C.faint, margin: "0 0 12px" }}>The member list is frozen when you create the campaign — clients added to the segment later aren't pulled in.</p>
+          <div className="flex" style={{ gap: 8 }}>
+            <SolidBtn onClick={create}>Create campaign</SolidBtn>
+            <GhostBtn onClick={() => setCreating(false)}>Cancel</GhostBtn>
+          </div>
+        </div>
+      )}
+
+      {list.length === 0 && !creating && (
+        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+          No campaigns yet. A campaign tracks a letter sequence (first letter → follow-up → done) across a whole audience, showing who's had which round.
+        </div>
+      )}
+
+      {list.map((cp) => {
+        const members = cp.memberIds.map((id) => byId.get(id)).filter(Boolean);
+        const doneCount = members.filter((c) => cp.done?.[c.id]).length;
+        const cur = cp.rounds[cp.rounds.length - 1];
+        const remaining = members.filter((c) => !cp.done?.[c.id] && !sentInRound(c, cp, cur)).length;
+        return (
+          <div key={cp.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10, opacity: cp.archived ? 0.55 : 1 }}>
+            <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <span style={{ fontSize: 14.5, fontWeight: 700 }}>{cp.name}</span>
+              <span style={{ fontSize: 11.5, color: C.faint, fontFamily: MONO }}>{members.length} members · started {fmtDate(cp.createdAt)}</span>
+              {doneCount > 0 && <MiniPill fg={C.green} bg={C.greenBg}>{doneCount} complete</MiniPill>}
+              <span style={{ marginLeft: "auto" }} />
+              {!cp.archived && <MiniBtn solid onClick={() => onSendRound(cp.id)}>{remaining ? `Send remaining (${remaining})` : "Open queue"}</MiniBtn>}
+              <MiniBtn onClick={() => onSave(campaigns.map((x) => (x.id === cp.id ? { ...x, archived: !x.archived } : x)))}>{cp.archived ? "Unarchive" : "Archive"}</MiniBtn>
+            </div>
+            {cp.rounds.map((r, i) => {
+              const sent = members.filter((c) => sentInRound(c, cp, r)).length;
+              const isCur = r === cur;
+              return (
+                <div key={r.id} className="flex items-center" style={{ gap: 10, padding: "4px 0", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, fontWeight: isCur ? 700 : 500, color: isCur ? C.ink : C.sub, minWidth: 170 }}>
+                    Round {i + 1} · {r.label} <span style={{ color: C.faint, fontWeight: 400 }}>({templates[r.type]?.label || r.type})</span>
+                  </span>
+                  {bar(sent, members.length, isCur ? C.action : C.green)}
+                  <span style={{ fontSize: 11.5, color: C.sub, fontFamily: MONO, minWidth: 70 }}>{sent}/{members.length} sent</span>
+                  <span style={{ fontSize: 11, color: C.faint }}>{fmtDate(r.startedAt)}</span>
+                </div>
+              );
+            })}
+            {!cp.archived && (roundFor === cp.id ? (
+              <div className="flex items-center" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                <input style={{ ...inputStyle, width: 200 }} value={roundLabel} onChange={(e) => setRoundLabel(e.target.value)} placeholder="Round label" />
+                <select style={{ ...inputStyle, width: 200 }} value={roundTpl} onChange={(e) => setRoundTpl(e.target.value)}>
+                  {Object.entries(templates).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <MiniBtn solid onClick={() => addRound(cp)}>Start round {cp.rounds.length + 1}</MiniBtn>
+                <MiniBtn onClick={() => setRoundFor(null)}>Cancel</MiniBtn>
+              </div>
+            ) : (
+              <button onClick={() => { setRoundFor(cp.id); setRoundTpl(cur?.type || Object.keys(templates)[0]); }}
+                style={{ background: "none", border: "none", padding: "6px 0 0", fontSize: 12, fontWeight: 600, color: C.action, cursor: "pointer" }}>
+                + Start next round
+              </button>
+            ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

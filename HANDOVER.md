@@ -10,7 +10,7 @@ Internal staff tool for VIP Event Resources: tracks client billing, arrears, rem
 | --- | --- |
 | Live | <https://viper-pro-billing-app.vercel.app> (auto-deploys on push to `main`) |
 | Repo | `ViperProBillingApp/ViperProBillingApp` |
-| Local | `~/Desktop/Claude/viper-crm` |
+| Local | `~/Desktop/Claude/Projects/ViperPro - CRM` (moved 2026-07-17; quote the space) |
 | Stack | Next.js 15 (JS, app router), React 19, Vercel serverless, Supabase Postgres |
 | Main file | `components/crm.jsx` (~3000 lines, mostly inline-styled) |
 | Brand | `lib/brand.js` — `C` palette, `SANS`/`DISPLAY`/`MONO`, `Wordmark` |

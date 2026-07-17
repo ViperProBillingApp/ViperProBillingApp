@@ -1641,7 +1641,7 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
 const parseChecklist = (s) => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 
 function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssign, onDragStart }) {
-  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignMenu, setAssignMenu] = useState(null); // null | {top, right} — portalled so the column's overflow:hidden can't clip it
   const lbl = TASK_LABELS[task.label];
   const overdue = task.due && task.lane !== "done" && new Date(task.due) < new Date(new Date().toDateString());
   const cl = parseChecklist(task.checklist);
@@ -1667,27 +1667,28 @@ function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssig
         <span style={{ flex: 1 }} />
         {task.due && <span style={{ fontSize: 10, color: overdue ? C.red : C.faint }}>{fmtDate(task.due)}</span>}
         {/* Assign directly from the card — Trello-style member button */}
-        <button onClick={(e) => { e.stopPropagation(); setAssignOpen((o) => !o); }} title={task.owner ? `Assigned: ${staffByEmail[task.owner] || task.owner} — click to change` : "Assign to…"}
+        <button onClick={(e) => { e.stopPropagation(); if (assignMenu) { setAssignMenu(null); return; } const r = e.currentTarget.getBoundingClientRect(); setAssignMenu({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); }} title={task.owner ? `Assigned: ${staffByEmail[task.owner] || task.owner} — click to change` : "Assign to…"}
           style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}>
           {task.owner
             ? <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />
             : <span style={{ width: 18, height: 18, borderRadius: 18, border: `1.5px dashed ${C.faint}`, color: C.faint, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>+</span>}
         </button>
       </div>
-      {assignOpen && (
+      {assignMenu && createPortal(
         <>
-          <div onClick={(e) => { e.stopPropagation(); setAssignOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 20 }} />
-          <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", right: 6, top: "100%", marginTop: -4, zIndex: 21, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
+          <div onClick={(e) => { e.stopPropagation(); setAssignMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: assignMenu.top, right: assignMenu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
             {staff.map((s) => (
-              <button key={s.email} onClick={() => { onAssign(s.email); setAssignOpen(false); }}
+              <button key={s.email} onClick={() => { onAssign(s.email); setAssignMenu(null); }}
                 style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: task.owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
                 <Avatar email={s.email} staffByEmail={staffByEmail} size={18} />{s.name || s.email}
               </button>
             ))}
-            {task.owner && <button onClick={() => { onAssign(""); setAssignOpen(false); }}
+            {task.owner && <button onClick={() => { onAssign(""); setAssignMenu(null); }}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: "none", border: "none", borderTop: `1px solid ${C.lineSoft}`, cursor: "pointer", color: C.sub }}>Unassign</button>}
           </div>
-        </>
+        </>,
+        document.body
       )}
     </div>
   );

@@ -1451,8 +1451,10 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
   // (mixed-case rows exist — see users_email_lower_idx), so compare lowercased.
   const isMine = (o) => (o || "").trim().toLowerCase() === (user.email || "").trim().toLowerCase();
 
-  const hiddenCount = clients.filter((c) => c.workflowHidden).length;
-  let visible = clients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
+  // Past Viper Customers never appear on the stages board (not even in the removed-from-workflow view)
+  const boardClients = clients.filter((c) => c.segment !== "viper-past");
+  const hiddenCount = boardClients.filter((c) => c.workflowHidden).length;
+  let visible = boardClients.filter((c) => (showHidden ? c.workflowHidden : !c.workflowHidden) && !coveredByGroup(c));
   if (mine) visible = visible.filter((c) => isMine(c.owner));
 
   const drop = (e, stage) => {
@@ -2278,9 +2280,10 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   );
   return (
     <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, alignItems: "start" }}>
-      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 4px", fontFamily: DISPLAY }}>What needs attention</h2>
-        <p style={{ fontSize: 13, color: C.sub, marginBottom: 16 }}>Live counts — click through to act. Nothing sends without your review.</p>
+      {/* Same Trello-blue gradient as the Workflow board */}
+      <div style={{ background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderRadius: 14, padding: 20 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 4px", fontFamily: DISPLAY, color: "#fff" }}>What needs attention</h2>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.78)", marginBottom: 16 }}>Live counts — click through to act. Nothing sends without your review.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <Row n={reminderList.length} label="Payment reminders to send" tint={C.red} to="comms" />
           <Row n={finals.length} label="Final notices (3+ periods behind)" tint={C.red} to="comms" />

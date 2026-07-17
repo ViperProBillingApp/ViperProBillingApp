@@ -1233,17 +1233,18 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
     <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: justify }}>
       {active && (
         <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex" }}>
-          <Funnel color={C.action} />
+          <Funnel color="#fff" />
         </button>
       )}
+      {/* header row sits on the workflow-blue gradient — white text, brighter when a filter is active */}
       <select value={value} onChange={(e) => onChange(e.target.value)} title="Filter this column"
         style={{ maxWidth: "100%", fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: active ? 700 : 600,
-          color: active ? C.action : C.sub, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: 0,
+          color: active ? "#fff" : "rgba(255,255,255,0.82)", background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: 0,
           appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlignLast: align === "right" ? "right" : align === "center" ? "center" : "left" }}>
-        <option value="all">{label}</option>
-        {options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        <option value="all" style={{ color: C.ink }}>{label}</option>
+        {options.map(([k, l]) => <option key={k} value={k} style={{ color: C.ink }}>{l}</option>)}
       </select>
-      <span style={{ fontSize: 10, color: active ? C.action : C.sub, pointerEvents: "none" }}>▾</span>
+      <span style={{ fontSize: 10, color: active ? "#fff" : "rgba(255,255,255,0.82)", pointerEvents: "none" }}>▾</span>
     </div>
   );
 }
@@ -1412,7 +1413,8 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
       </div>
       <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
-        <div style={{ padding: "10px 16px", background: C.lineSoft, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
+        {/* Same Trello-blue gradient as the Workflow board */}
+        <div style={{ padding: "10px 16px", background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />

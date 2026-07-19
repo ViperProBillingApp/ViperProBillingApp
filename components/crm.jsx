@@ -1482,9 +1482,12 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
           {segBtn("stages", "Client stages")}
           {segBtn("tasks", "Tasks")}
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "rgba(255,255,255,0.88)", fontWeight: 600, cursor: "pointer" }}>
-          <input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> My cards
-        </label>
+        {/* All cards / My cards — same segmented style as the board switcher */}
+        <div style={{ display: "inline-flex", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
+          {[[false, "All cards"], [true, "My cards"]].map(([v, label]) => (
+            <button key={label} onClick={() => setMine(v)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: mine === v ? "#fff" : "transparent", color: mine === v ? C.ink : "rgba(255,255,255,0.85)", cursor: "pointer" }}>{label}</button>
+          ))}
+        </div>
         {mine && !visible.length && board === "stages" && (
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>No cards assigned to you — set yourself as Owner on a client card (Info tab).</span>
         )}
@@ -1540,13 +1543,6 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
                         const left = t ? Math.max(0, 10 - Math.floor((Date.now() - t) / 86400000)) : 10;
                         return <div style={{ fontSize: 10.5, color: left <= 2 ? C.amber : C.faint, marginTop: 2 }}>Contacted {fmtDate(c.stageAt || c.createdAt)} · returns to Need to contact in {left}d</div>;
                       })()}
-                      {(c.owner || taskCount[c.id]) && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
-                          {taskCount[c.id] > 0 && <span style={{ fontSize: 10.5, color: C.sub }}>{taskCount[c.id]} task{taskCount[c.id] > 1 ? "s" : ""}</span>}
-                          <span style={{ flex: 1 }} />
-                          {c.owner && <Avatar email={c.owner} staffByEmail={staffByEmail} size={18} />}
-                        </div>
-                      )}
                     </button>
                     {!showHidden && (
                       <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
@@ -1554,6 +1550,12 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
                         {STAGE_ORDER.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
                       </select>
                     )}
+                    {/* Assign staff straight from the card, same control as task cards */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 5 }}>
+                      {taskCount[c.id] > 0 && <span style={{ fontSize: 10.5, color: C.sub }}>{taskCount[c.id]} task{taskCount[c.id] > 1 ? "s" : ""}</span>}
+                      <span style={{ flex: 1 }} />
+                      <AssignButton owner={c.owner} staff={staff} staffByEmail={staffByEmail} onAssign={(owner) => onUpdate(c.id, { owner })} />
+                    </div>
                   </div>
                 ))}
                 {col.length === 0 && <div style={{ fontSize: 11, color: C.faint, textAlign: "center", padding: "8px 0" }}>—</div>}
@@ -1619,7 +1621,7 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
               <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
                 {col.map((t) => (
                   <TaskCard key={t.id} task={t} client={clientById[t.client_id]} staff={staff} staffByEmail={staffByEmail}
-                    onOpen={() => setEditing(t)} onClient={onOpen} onAssign={(owner) => save(t.id, { owner })}
+                    onOpen={() => setEditing(t)} onClient={onOpen} onAssign={(owner) => save(t.id, { owner })} onDelete={() => del(t.id)}
                     onDragStart={(e) => e.dataTransfer.setData("text/plain", t.id)} />
                 ))}
                 {addingLane === lane ? (
@@ -1649,17 +1651,64 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
 
 const parseChecklist = (s) => { try { const v = JSON.parse(s || "[]"); return Array.isArray(v) ? v : []; } catch { return []; } };
 
-function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssign, onDragStart }) {
-  const [assignMenu, setAssignMenu] = useState(null); // null | {top, right} — portalled so the column's overflow:hidden can't clip it
+// Trello-style assign control: avatar (or dashed +) opening a portalled staff menu.
+// Shared by task cards and client-stage cards; portalled so column overflow can't clip it.
+function AssignButton({ owner, staff, staffByEmail, onAssign, size = 18 }) {
+  const [menu, setMenu] = useState(null); // null | {top, right}
+  return (
+    <>
+      <button onClick={(e) => { e.stopPropagation(); if (menu) { setMenu(null); return; } const r = e.currentTarget.getBoundingClientRect(); setMenu({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); }}
+        title={owner ? `Assigned: ${staffByEmail[owner] || owner} — click to change` : "Assign to…"}
+        style={{ background: "none", border: "none", padding: 3, margin: -3, cursor: "pointer", display: "inline-flex" }}>
+        {owner
+          ? <Avatar email={owner} staffByEmail={staffByEmail} size={size} />
+          : <span style={{ width: size, height: size, borderRadius: size, border: `1.5px dashed ${C.faint}`, color: C.faint, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>+</span>}
+      </button>
+      {menu && createPortal(
+        <>
+          <div onClick={(e) => { e.stopPropagation(); setMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: menu.top, right: menu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
+            {staff.map((s) => (
+              <button key={s.email} onClick={() => { onAssign(s.email); setMenu(null); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
+                <Avatar email={s.email} staffByEmail={staffByEmail} size={18} />{s.name || s.email}
+              </button>
+            ))}
+            {owner && <button onClick={() => { onAssign(""); setMenu(null); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: "none", border: "none", borderTop: `1px solid ${C.lineSoft}`, cursor: "pointer", color: C.sub }}>Unassign</button>}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}
+
+function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssign, onDelete, onDragStart }) {
+  const [confirmDel, setConfirmDel] = useState(false);
   const lbl = TASK_LABELS[task.label];
   const overdue = task.due && task.lane !== "done" && new Date(task.due) < new Date(new Date().toDateString());
   const cl = parseChecklist(task.checklist);
   const clDone = cl.filter(([, d]) => d).length;
+  const iconBtn = { background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1, display: "inline-flex" };
   return (
     <div draggable onDragStart={onDragStart} onClick={onOpen}
+      onMouseLeave={() => setConfirmDel(false)}
       style={{ position: "relative", background: C.paper, borderRadius: 8, border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
-      {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: 20, background: lbl.bg, color: lbl.fg }}>{lbl.label}</span>}
-      <div style={{ fontSize: 12.5, marginTop: lbl ? 5 : 0, color: C.ink, lineHeight: 1.3, opacity: task.lane === "done" ? 0.6 : 1, textDecoration: task.lane === "done" ? "line-through" : "none" }}>{task.title}</div>
+      {/* Edit + delete, top right. Delete asks twice (icon turns into a red "sure?"). */}
+      <div style={{ position: "absolute", top: 3, right: 3, display: "flex", gap: 1 }}>
+        <button onClick={(e) => { e.stopPropagation(); onOpen(); }} title="Edit task" style={{ ...iconBtn, color: C.faint }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>
+        </button>
+        <button onClick={(e) => { e.stopPropagation(); confirmDel ? onDelete() : setConfirmDel(true); }} title={confirmDel ? "Click again to delete" : "Delete task"}
+          style={{ ...iconBtn, color: confirmDel ? "#fff" : C.faint, background: confirmDel ? C.red : "none", fontSize: 10.5, fontWeight: 700 }}>
+          {confirmDel ? "sure?" : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
+          )}
+        </button>
+      </div>
+      {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: 20, background: lbl.bg, color: lbl.fg, marginRight: 44 }}>{lbl.label}</span>}
+      <div style={{ fontSize: 12.5, marginTop: lbl ? 5 : 0, paddingRight: lbl ? 0 : 44, color: C.ink, lineHeight: 1.3, opacity: task.lane === "done" ? 0.6 : 1, textDecoration: task.lane === "done" ? "line-through" : "none" }}>{task.title}</div>
       {task.note && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 3, lineHeight: 1.3 }}>{task.note}</div>}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7 }}>
         {client && (
@@ -1676,29 +1725,8 @@ function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssig
         <span style={{ flex: 1 }} />
         {task.due && <span style={{ fontSize: 10, color: overdue ? C.red : C.faint }}>{fmtDate(task.due)}</span>}
         {/* Assign directly from the card — Trello-style member button */}
-        <button onClick={(e) => { e.stopPropagation(); if (assignMenu) { setAssignMenu(null); return; } const r = e.currentTarget.getBoundingClientRect(); setAssignMenu({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); }} title={task.owner ? `Assigned: ${staffByEmail[task.owner] || task.owner} — click to change` : "Assign to…"}
-          style={{ background: "none", border: "none", padding: 3, margin: -3, cursor: "pointer", display: "inline-flex" }}>
-          {task.owner
-            ? <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />
-            : <span style={{ width: 18, height: 18, borderRadius: 18, border: `1.5px dashed ${C.faint}`, color: C.faint, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>+</span>}
-        </button>
+        <AssignButton owner={task.owner} staff={staff} staffByEmail={staffByEmail} onAssign={onAssign} />
       </div>
-      {assignMenu && createPortal(
-        <>
-          <div onClick={(e) => { e.stopPropagation(); setAssignMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
-          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: assignMenu.top, right: assignMenu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
-            {staff.map((s) => (
-              <button key={s.email} onClick={() => { onAssign(s.email); setAssignMenu(null); }}
-                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: task.owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
-                <Avatar email={s.email} staffByEmail={staffByEmail} size={18} />{s.name || s.email}
-              </button>
-            ))}
-            {task.owner && <button onClick={() => { onAssign(""); setAssignMenu(null); }}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: "none", border: "none", borderTop: `1px solid ${C.lineSoft}`, cursor: "pointer", color: C.sub }}>Unassign</button>}
-          </div>
-        </>,
-        document.body
-      )}
     </div>
   );
 }

@@ -632,13 +632,13 @@ export default function CRM({ user }) {
           </div>
         )}
 
-        {/* Metrics box + tab row share one continuous #F8FAFD background (no gap
+        {/* Metrics box + tab row share one continuous board-gradient background (no gap
             between them); the metrics keep their original boxed padding. */}
-        <div style={{ background: "#F8FAFD", borderBottom: `1px solid ${C.line}`, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
+        <div style={{ background: C.boardGradient, borderBottom: `1px solid ${C.line}`, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
           <div style={{ padding: "14px 16px 4px" }}>
             <header style={{ marginBottom: 12 }}>
-              <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em" }}>Client Billing CRM</h1>
-              {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 8 }}>{sync.msg}</p>}
+              <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em", color: "#fff" }}>Client Billing CRM</h1>
+              {sync.msg && <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.78)", marginTop: 8 }}>{sync.msg}</p>}
             </header>
             <StatStrip clients={active} settings={settings} bounced={bounced.length} />
           </div>
@@ -652,7 +652,7 @@ export default function CRM({ user }) {
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
               <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
               <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-              <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 56, textAlign: "right" }}>
+              <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
               </span>
             </div>
@@ -1230,9 +1230,11 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
   const active = value !== "all";
   const justify = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: justify }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: justify,
+      // active filter gets a soft pill so a filtered column reads at a glance
+      background: active ? "rgba(255,255,255,0.16)" : "transparent", borderRadius: 6, padding: "2px 6px", margin: "-2px -6px" }}>
       {active && (
-        <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex" }}>
+        <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 7, margin: -7, cursor: "pointer", display: "flex" }}>
           <Funnel color="#fff" />
         </button>
       )}
@@ -1414,7 +1416,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
       </div>
       <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
         {/* Same Trello-blue gradient as the Workflow board */}
-        <div style={{ padding: "10px 16px", background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
+        <div style={{ padding: "10px 16px", background: C.boardGradient, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Billing" value={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
           <HeaderFilter label="Stage" value={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
@@ -1471,7 +1473,7 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
 
   return (
     // Trello-style board backdrop: deep blue gradient behind both boards.
-    <div style={{ background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderRadius: 14, padding: "14px 14px 18px", margin: "0 -4px" }}>
+    <div style={{ background: C.boardGradient, borderRadius: 14, padding: "14px 14px 18px", margin: "0 -4px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ display: "inline-flex", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
           {segBtn("stages", "Client stages")}
@@ -1519,7 +1521,7 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
                       onClick={() => onUpdate(c.id, { workflowHidden: !showHidden })}
                       title={showHidden ? "Add back to workflow" : "Remove from workflow"}
                       aria-label={showHidden ? "Add back to workflow" : "Remove from workflow"}
-                      style={{ position: "absolute", top: 4, right: 4, background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer", lineHeight: 1, padding: 4, borderRadius: 6 }}
+                      style={{ position: "absolute", top: 2, right: 2, background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer", lineHeight: 1, padding: 6, borderRadius: 6 }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                       {showHidden ? "↺" : "✕"}
                     </button>
@@ -1672,7 +1674,7 @@ function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssig
         {task.due && <span style={{ fontSize: 10, color: overdue ? C.red : C.faint }}>{fmtDate(task.due)}</span>}
         {/* Assign directly from the card — Trello-style member button */}
         <button onClick={(e) => { e.stopPropagation(); if (assignMenu) { setAssignMenu(null); return; } const r = e.currentTarget.getBoundingClientRect(); setAssignMenu({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) }); }} title={task.owner ? `Assigned: ${staffByEmail[task.owner] || task.owner} — click to change` : "Assign to…"}
-          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", display: "inline-flex" }}>
+          style={{ background: "none", border: "none", padding: 3, margin: -3, cursor: "pointer", display: "inline-flex" }}>
           {task.owner
             ? <Avatar email={task.owner} staffByEmail={staffByEmail} size={18} />
             : <span style={{ width: 18, height: 18, borderRadius: 18, border: `1.5px dashed ${C.faint}`, color: C.faint, fontSize: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>+</span>}
@@ -2283,7 +2285,7 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   return (
     <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, alignItems: "start" }}>
       {/* Same Trello-blue gradient as the Workflow board */}
-      <div style={{ background: "linear-gradient(155deg, #16305F 0%, #1D4586 45%, #2A62B8 100%)", borderRadius: 14, padding: 20 }}>
+      <div style={{ background: C.boardGradient, borderRadius: 14, padding: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 4px", fontFamily: DISPLAY, color: "#fff" }}>What needs attention</h2>
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.78)", marginBottom: 16 }}>Live counts — click through to act. Nothing sends without your review.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

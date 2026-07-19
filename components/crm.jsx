@@ -852,7 +852,10 @@ function PricingPanel({ settings, onSave }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact }) {
+  // compact: tighter inputs so the whole editor (incl. Send) fits the compose modal without scrolling
+  const inp = compact ? { ...inputStyle, padding: "6px 9px", fontSize: 12.5 } : inputStyle;
+  const monoSize = compact ? 12 : 13;
   const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
@@ -934,15 +937,15 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
     <div>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field label={recipients ? `To · all contacts across ${officeSiblings.length + 1} offices` : "To"}>
-          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={toStr} onChange={(e) => setToStr(e.target.value)} placeholder="email, email…" />
+          <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize }} value={toStr} onChange={(e) => setToStr(e.target.value)} placeholder="email, email…" />
         </Field>
         <Field label="From">
-          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={fromStr} onChange={(e) => setFromStr(e.target.value)} title="Must be a sender address verified in Brevo" />
+          <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize }} value={fromStr} onChange={(e) => setFromStr(e.target.value)} title="Must be a sender address verified in Brevo" />
         </Field>
       </div>
       <Field label="CC">
         <div className="flex items-center" style={{ gap: 8 }}>
-          <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13, flex: 1 }} value={ccStr} onChange={(e) => setCcStr(e.target.value)} placeholder="Add emails, comma separated" />
+          <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize, flex: 1 }} value={ccStr} onChange={(e) => setCcStr(e.target.value)} placeholder="Add emails, comma separated" />
           {ccOptions.length > 0 && (
             <select value="" title="Add one of this company's contacts to CC"
               onChange={(e) => { const v = e.target.value; if (v) setCcStr((s) => (s.trim() ? s.trim().replace(/,$/, "") + ", " : "") + v); }}
@@ -953,13 +956,13 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
           )}
         </div>
       </Field>
-      <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
-      <Field label="Message"><textarea rows={8} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      <Field label="Subject"><input style={inp} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
+      <Field label="Message"><textarea rows={compact ? 6 : 8} style={{ ...inp, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       {/* Sender's signature — appended automatically by the send route */}
       {signatureImage ? (
         <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
           <span style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, flexShrink: 0 }}>Signature ·</span>
-          <img src={signatureImage} alt="your email signature" style={{ maxHeight: 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
+          <img src={signatureImage} alt="your email signature" style={{ maxHeight: compact ? 26 : 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
           <span style={{ fontSize: 11, color: C.faint }}>added automatically</span>
         </div>
       ) : (
@@ -999,9 +1002,9 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
-    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader>
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} />
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} compact />
     </Modal>
   );
 }
@@ -3824,10 +3827,10 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
   );
 }
 
-function Modal({ title, onClose, children, wide, blueHeader }) {
+function Modal({ title, onClose, children, wide, blueHeader, tall }) {
   return (
     <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: tall ? "96vh" : "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}`, background: blueHeader ? C.boardGradient : undefined }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, color: blueHeader ? "#fff" : undefined }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: blueHeader ? "rgba(255,255,255,0.85)" : C.sub, cursor: "pointer", padding: 4, margin: -4 }}>✕</button>

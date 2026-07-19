@@ -650,8 +650,8 @@ export default function CRM({ user }) {
               <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
-              <MiniBtn solid onClick={() => setModal("import")}>Import CSV</MiniBtn>
-              <MiniBtn onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+              <MiniBtn solid small onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn small onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
               </span>
@@ -999,7 +999,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
-    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose}>
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
       <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} />
     </Modal>
@@ -3366,7 +3366,7 @@ function Tab({ active, onClick, children }) {
     </button>
   );
 }
-function MiniBtn({ solid, onClick, children }) { return <button onClick={onClick} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{children}</button>; }
+function MiniBtn({ solid, small, onClick, children }) { return <button onClick={onClick} style={{ fontSize: small ? 10.5 : 12, fontWeight: 600, padding: small ? "3px 8px" : "6px 11px", borderRadius: small ? 6 : 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{children}</button>; }
 function SolidBtn({ onClick, disabled, children }) { return <button onClick={onClick} disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: disabled ? "default" : "pointer", border: "none", background: disabled ? C.grey : C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
@@ -3824,13 +3824,13 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
   );
 }
 
-function Modal({ title, onClose, children, wide }) {
+function Modal({ title, onClose, children, wide, blueHeader }) {
   return (
     <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
-        <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}` }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY }}>{title}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
+        <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}`, background: blueHeader ? C.boardGradient : undefined }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, color: blueHeader ? "#fff" : undefined }}>{title}</h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: blueHeader ? "rgba(255,255,255,0.85)" : C.sub, cursor: "pointer", padding: 4, margin: -4 }}>✕</button>
         </div>
         <div style={{ padding: 20 }}>{children}</div>
       </div>

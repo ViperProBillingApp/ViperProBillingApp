@@ -634,7 +634,7 @@ export default function CRM({ user }) {
 
         {/* Metrics box + tab row share one continuous board-gradient background (no gap
             between them); the metrics keep their original boxed padding. */}
-        <div style={{ background: C.boardGradient, borderBottom: `1px solid ${C.line}`, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
+        <div style={{ background: C.boardGradient, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
           <div style={{ padding: "14px 16px 4px" }}>
             <header style={{ marginBottom: 12 }}>
               <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em", color: "#fff" }}>Client Billing CRM</h1>

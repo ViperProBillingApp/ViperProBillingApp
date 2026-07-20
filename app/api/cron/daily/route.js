@@ -9,10 +9,11 @@ import { readState } from "../../../../lib/clients.js";
 export const maxDuration = 60;
 
 // Runs at 06:30, after the 06:00 ChargeOver sync, so the digest reads fresh
-// balances. Does two things in one job: appends today's KPI snapshot (the
-// Reports tab's trend data) and emails the digest to active staff.
+// balances. Backup + KPI snapshot (the Reports tab's trend data) run every
+// day; the digest email only goes out on Mondays (weekly), unless forceEmail
+// (the admin's "run digest now" button).
 // Idempotent on date — a re-run the same day does nothing.
-async function runDaily() {
+async function runDaily(forceEmail = false) {
   const db = await getDb();
   // F-04 + F-14: automated state backup and expired-row housekeeping, first,
   // so a later failure in the digest still leaves us with a fresh snapshot.
@@ -37,6 +38,9 @@ async function runDaily() {
 
   const { rows: staff } = await db.query("SELECT email, name FROM users WHERE active = true");
   if (!staff.length) return { ok: true, snapshot: k.date, emailed: false, reason: "no active staff", backup };
+  if (!forceEmail && new Date().getUTCDay() !== 1) {
+    return { ok: true, snapshot: k.date, emailed: false, reason: "weekly digest — emails Mondays only", backup };
+  }
 
   const cur = (state.settings || {}).currency || "GBP";
   const owed = topOwed(active, 10);
@@ -58,7 +62,7 @@ ${owed.length ? `<p style="margin-top:16px"><strong>Largest balances</strong></p
 <p style="margin-top:16px"><a href="https://viper-pro-billing-app.vercel.app">Open ViperPro</a></p>
 <p>Best,<br>ViperPro Accounting Team</p>`;
 
-  const emailed = await sendDigestEmail(staff.map((u) => ({ email: u.email, name: u.name || "" })), `ViperPro daily digest — ${fmtMoney(k.totalOwed, cur)} owed, ${k.overdue} in arrears`, html);
+  const emailed = await sendDigestEmail(staff.map((u) => ({ email: u.email, name: u.name || "" })), `ViperPro weekly digest — ${fmtMoney(k.totalOwed, cur)} owed, ${k.overdue} in arrears`, html);
   return { ok: true, snapshot: k.date, emailed, recipients: staff.length, backup };
 }
 
@@ -74,12 +78,12 @@ export async function GET(req) {
   }
 }
 
-// Manual "run digest now" — admins only, same job.
+// Manual "run digest now" — admins only, same job; always emails regardless of weekday.
 export async function POST() {
   const me = await getSessionUser();
   if (!me || me.role !== "admin") return NextResponse.json({ error: "Admins only" }, { status: 403 });
   try {
-    return NextResponse.json(await runDaily());
+    return NextResponse.json(await runDaily(true));
   } catch (e) {
     return NextResponse.json({ error: String(e.message) }, { status: 502 });
   }

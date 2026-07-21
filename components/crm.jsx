@@ -757,7 +757,7 @@ function MenuItem({ onClick, active, icon, children }) {
 const ONBOARDING_STEPS = [
   { where: "Admin Site › Offices", text: "Create a new office.", note: "This just creates the Office for access to Viper — you'll create the supplier company profile in a later step." },
   { where: "Admin Site › Employees", text: "Set up users on the new office:", subs: [
-    "Add a new user (if needed). In the Permissions tab, be sure to add the “Vendor” permission so they have the restricted view.",
+    "Add a new user (if needed). In the Permissions tab, be sure to add the “Vendor” and “May Edit Tariff” permissions so they have the restricted view.",
     "Add any additional users — new or existing — to the new office.",
     "Add the Site Administrator to the new office.",
   ] },

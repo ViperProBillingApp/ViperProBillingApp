@@ -527,19 +527,31 @@ export default function CRM({ user }) {
   const active = useMemo(() => clients.filter((c) => !c.archivedClient), [clients]);
   const bounced = active.filter((c) => c.emailStatus !== "ok");
 
-  const addClients = useCallback((rows) => {
+  // merge: fold rows into existing clients by chargeoverId/email (CSV import
+  // dedupe). Manual "Add client" passes merge:false — always creates, since
+  // multi-office groups legitimately share one billing email and a silent
+  // merge made the new office "disappear" into its sibling.
+  const addClients = useCallback((rows, { merge = true } = {}) => {
     setClients((prev) => {
-      const byKey = new Map(prev.map((c) => [c.chargeoverId || (c.email || "").toLowerCase() || c.id, c]));
+      // NEVER rebuild the list through a map keyed on email: offices in a
+      // group share one billing email, and a keyed rebuild collapses them to
+      // one record — the diff-save then deletes the siblings from the DB.
+      const next = [...prev];
+      const idx = new Map(); // dedupe key -> index of first occurrence
+      next.forEach((c, i) => { const k = c.chargeoverId || (c.email || "").toLowerCase(); if (k && !idx.has(k)) idx.set(k, i); });
       for (const r of rows) {
         const clean = normalise(r);
-        if (!clean.name && !clean.email) continue;
+        if (!clean.name && !clean.company && !clean.email) continue; // truly empty row
         const key = clean.chargeoverId || clean.email.toLowerCase();
-        if (key && byKey.has(key)) {
-          const ex = byKey.get(key);
-          Object.assign(ex, clean, { id: ex.id, reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity, payments: clean.payments.length ? clean.payments : ex.payments, noteCards: clean.noteCards.length ? [...clean.noteCards, ...(ex.noteCards || [])] : ex.noteCards });
-        } else byKey.set(key || clean.id, clean);
+        if (merge && key && idx.has(key)) {
+          const ex = next[idx.get(key)];
+          next[idx.get(key)] = { ...ex, ...clean, id: ex.id, reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity, payments: clean.payments.length ? clean.payments : ex.payments, noteCards: clean.noteCards.length ? [...clean.noteCards, ...(ex.noteCards || [])] : ex.noteCards };
+        } else {
+          next.push(clean);
+          if (key && !idx.has(key)) idx.set(key, next.length - 1);
+        }
       }
-      return Array.from(byKey.values());
+      return next;
     });
   }, []);
   const update = useCallback((id, patch) => setClients((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))), []);
@@ -690,7 +702,7 @@ export default function CRM({ user }) {
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
         officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
-      {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r]); setModal(null); }} /></Modal>}
+      {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r], { merge: false }); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
       {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} user={user} /></Modal>}
       {modal === "onboarding" && <Modal wide title="Maritz Onboarding — adding a new office" onClose={() => setModal(null)}><MaritzOnboarding /></Modal>}

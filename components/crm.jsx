@@ -2480,7 +2480,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
   const setPricingMode = (mode) => {
     if (!client.multiOffice) { set({ priceMode: mode }); return; }
     if (mode === "group") {
-      const tier = groupTierFor(officeSiblings.length + 1, settings.maritzGroupTiers || GROUP_TIER_DEFAULTS);
+      const tier = groupTierFor([client, ...officeSiblings].filter((o) => !o.groupBillingMaster).length, settings.maritzGroupTiers || GROUP_TIER_DEFAULTS);
       onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m });
       officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "group", groupBillingMaster: false }));
     } else {
@@ -3200,7 +3200,8 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
     const names = [client, ...officeSiblings].map((o) => o.company || o.name).filter(Boolean);
     navigator.clipboard?.writeText(names.join("\n")).then(() => { setCopiedNames(true); setTimeout(() => setCopiedNames(false), 1600); });
   };
-  const count = officeSiblings.length + 1;
+  // Count real offices only — the "(Group)" billing card itself is not an office
+  const count = [client, ...officeSiblings].filter((o) => !o.groupBillingMaster).length;
   const tier = groupTierFor(count, tiers);
   const isGroup = client.priceMode === "group";
   const master = isGroup && client.groupBillingMaster;

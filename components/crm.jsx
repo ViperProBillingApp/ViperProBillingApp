@@ -505,7 +505,28 @@ export default function CRM({ user }) {
           body: JSON.stringify({ upserts, deletes, settings: settingsChanged ? settings : undefined, rev: revRef.current }),
         });
         if (r.status === 401) { window.location.href = "/login"; return; }
-        if (r.status === 409) { setSaveState("stale"); return; }
+        if (r.status === 409) {
+          // Rev moved outside this tab (nightly ChargeOver sync, another tab or
+          // staff member saving). Auto-rebase instead of freezing: adopt server
+          // state, overlay this tab's unsaved client edits, and let the effect
+          // re-fire to save the diff against the new rev. Unsaved local DELETES
+          // are dropped by a rebase (the server copy comes back) — the safe
+          // direction. The "stale" freeze remains only if the re-fetch fails.
+          try {
+            const sr = await fetch("/api/state");
+            if (!sr.ok) { setSaveState("stale"); return; }
+            const sd = await sr.json();
+            const server = (Array.isArray(sd.clients) ? sd.clients : []).map(normalise);
+            const localEdits = new Map(upserts.map((c) => [c.id, c]));
+            const serverIds = new Set(server.map((c) => c.id));
+            const merged = server.map((c) => localEdits.get(c.id) || c);
+            upserts.forEach((c) => { if (!serverIds.has(c.id)) merged.push(c); }); // clients this tab created
+            revRef.current = sd.rev || 0;
+            baselineRef.current = new Map(server.map((c) => [c.id, JSON.stringify(c)]));
+            setClients(merged);
+          } catch { setSaveState("stale"); }
+          return;
+        }
         const d = await r.json().catch(() => ({}));
         if (r.ok && d.rev) {
           revRef.current = d.rev;
@@ -613,7 +634,8 @@ export default function CRM({ user }) {
   return (
     <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
-      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+      {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
+      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -625,9 +647,9 @@ export default function CRM({ user }) {
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
-        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
-          <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
-          <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
+        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.3)" }}>
+          <div style={{ fontSize: 12, color: "#fff", padding: "0 6px 6px" }}>{user.name || user.email}</div>
+          <MenuItem icon="signout" onClick={logout} light>Sign out</MenuItem>
         </div>
       </aside>
 
@@ -721,7 +743,7 @@ export default function CRM({ user }) {
 
 // Brand-blue nav glyphs — one per left-menu heading.
 function MenuIcon({ name, color }) {
-  const p = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
+  const p = { width: 21, height: 21, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
   switch (name) {
     case "add": return <svg {...p}><path d="M12 5v14M5 12h14" /></svg>;
     case "recovery": return <svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>;
@@ -738,16 +760,22 @@ function MenuIcon({ name, color }) {
   }
 }
 // Left-panel menu button
-function MenuItem({ onClick, active, icon, children }) {
+function MenuItem({ onClick, active, icon, children, light }) {
+  // light: sits on the aside's bottom blue wash — white text/icon, translucent hover
   return (
     <button
       onClick={onClick}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.lineSoft; }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = light ? "rgba(255,255,255,0.16)" : C.lineSoft; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
-      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: light ? "#fff" : active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
     >
-      {icon && <MenuIcon name={icon} color={C.action} />}
-      <span>{children}</span>
+      {icon && <MenuIcon name={icon} color={light ? "#fff" : C.action} />}
+      {/* Multi-word labels break at the first space so every item is at most two lines */}
+      <span style={{ lineHeight: 1.25 }}>
+        {typeof children === "string" && children.includes(" ")
+          ? <>{children.slice(0, children.indexOf(" "))}<br />{children.slice(children.indexOf(" ") + 1)}</>
+          : children}
+      </span>
     </button>
   );
 }
@@ -864,10 +892,15 @@ function PricingPanel({ settings, onSave }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact, dark }) {
   // compact: tighter inputs so the whole editor (incl. Send) fits the compose modal without scrolling
+  // dark: editor sits on the board gradient (Emails tab) — labels/hints go white, inputs stay white
   const inp = compact ? { ...inputStyle, padding: "6px 9px", fontSize: 12.5 } : inputStyle;
   const monoSize = compact ? 12 : 13;
+  const subC = dark ? "rgba(255,255,255,0.85)" : C.sub;
+  const faintC = dark ? "rgba(255,255,255,0.65)" : C.faint;
+  const greenC = dark ? "#8FE3B8" : C.green;
+  const redC = dark ? "#FFB4AD" : C.red;
   const tpl = templates[type] || templates.custom;
   const key = `${type}:${periodKey()}`;
   const saved = (client.reminders && client.reminders[key]) || {};
@@ -948,14 +981,14 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
   return (
     <div>
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Field label={recipients ? `To · all contacts across ${officeSiblings.length + 1} offices` : "To"}>
+        <Field dark={dark} label={recipients ? `To · all contacts across ${officeSiblings.length + 1} offices` : "To"}>
           <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize }} value={toStr} onChange={(e) => setToStr(e.target.value)} placeholder="email, email…" />
         </Field>
-        <Field label="From">
+        <Field dark={dark} label="From">
           <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize }} value={fromStr} onChange={(e) => setFromStr(e.target.value)} title="Must be a sender address verified in Brevo" />
         </Field>
       </div>
-      <Field label="CC">
+      <Field dark={dark} label="CC">
         <div className="flex items-center" style={{ gap: 8 }}>
           <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize, flex: 1 }} value={ccStr} onChange={(e) => setCcStr(e.target.value)} placeholder="Add emails, comma separated" />
           {ccOptions.length > 0 && (
@@ -968,39 +1001,39 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
           )}
         </div>
       </Field>
-      <Field label="Subject"><input style={inp} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
-      <Field label="Message"><textarea rows={compact ? 6 : 8} style={{ ...inp, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      <Field dark={dark} label="Subject"><input style={inp} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
+      <Field dark={dark} label="Message"><textarea rows={compact ? 6 : 8} style={{ ...inp, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       {/* Sender's signature — appended automatically by the send route */}
       {signatureImage ? (
         <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, flexShrink: 0 }}>Signature ·</span>
+          <span style={{ fontSize: 11.5, fontWeight: 600, color: subC, flexShrink: 0 }}>Signature ·</span>
           <img src={signatureImage} alt="your email signature" style={{ maxHeight: compact ? 26 : 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
-          <span style={{ fontSize: 11, color: C.faint }}>added automatically</span>
+          <span style={{ fontSize: 11, color: faintC }}>added automatically</span>
         </div>
       ) : (
-        <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 10 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
+        <p style={{ fontSize: 11.5, color: faintC, marginBottom: 10 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
       )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
         <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer" }}>
           {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
         </button>
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
-        {saved.sentAt && <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
+        {saved.sentAt && <span style={{ fontSize: 12, color: greenC, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
         {saved.sentAt && (
           <button onClick={() => onLogSent(client.id, key, { sentAt: null, via: null, dismissedAt: null }, tpl.label)}
-            style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: C.sub, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
+            style={{ background: "none", border: "none", padding: 0, fontSize: 12, color: subC, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2 }}>
             Undo
           </button>
         )}
-        {send.err && <span style={{ fontSize: 12, color: C.red }}>{send.err}</span>}
+        {send.err && <span style={{ fontSize: 12, color: redC }}>{send.err}</span>}
       </div>
       {/* Post-send follow-through: set statuses without leaving the queue */}
       {saved.sentAt && onUpdateWithLog && (
         <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.sub }}>Billing status</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: subC }}>Billing status</span>
           <MiniSelect value={client.billingStatus} onChange={(v) => onUpdateWithLog(client.id, { billingStatus: v }, "status", `Billing status → ${BILLING[v].label}`)}
             options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
-          <span style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginLeft: 6 }}>Workflow</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: subC, marginLeft: 6 }}>Workflow</span>
           <MiniSelect value={client.stage} onChange={(v) => onUpdateWithLog(client.id, { stage: v }, "stage", `Stage → ${STAGES[v].label}`)}
             options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
         </div>
@@ -1031,17 +1064,17 @@ function StatStrip({ clients, settings, bounced }) {
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
-      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} />
-      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} />
-      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} />
-      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} />
-      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} />
+      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} bg="#F0F5FC" />
+      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} bg="#E4EDF9" />
+      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} bg="#D8E5F6" />
+      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} bg="#CCDDF3" />
+      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} bg="#C0D5F0" />
     </section>
   );
 }
-function Stat({ label, value, sub, accent, small }) {
+function Stat({ label, value, sub, accent, small, bg }) {
   return (
-    <div style={{ background: C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "8px 10px" }}>
+    <div style={{ background: bg || C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "8px 10px" }}>
       <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
         <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0 }} />
         <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
@@ -2112,12 +2145,12 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               const behind = arrearsPeriods(c);
               return (
                 <button key={c.id} onClick={() => setSelId(c.id)}
-                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, background: on ? "#E3EAF5" : "transparent", boxShadow: on ? `inset 0 0 0 1px ${C.accent}` : "none", opacity: sent ? 0.75 : 1 }}>
+                  style={{ display: "block", width: "100%", textAlign: "left", padding: "10px 12px", cursor: "pointer", border: "none", borderBottom: `1px solid ${C.lineSoft}`, background: on ? C.boardGradient : "transparent", opacity: sent && !on ? 0.75 : 1 }}>
                   <div className="flex items-center justify-between" style={{ gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
-                    {sent && <span style={{ color: C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: on ? "#fff" : C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
+                    {sent && <span style={{ color: on ? "#8FE3B8" : C.green, fontSize: 12, flexShrink: 0 }} title={`Sent ${fmtDate(sent)}`}>✓</span>}
                   </div>
-                  <div style={{ fontSize: 11, color: sent ? C.green : C.sub, fontWeight: sent ? 600 : 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ fontSize: 11, color: sent ? (on ? "#8FE3B8" : C.green) : on ? "rgba(255,255,255,0.8)" : C.sub, fontWeight: sent ? 600 : 400, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {sent ? (
                       <span role="button" tabIndex={0} title="View the email that was sent"
                         onClick={(e) => { e.stopPropagation(); setMailView({ c, mail: sentMailOf(c) }); }}
@@ -2131,11 +2164,11 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
               );
             })}
           </div>
-          {/* Editor */}
-          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 18 }}>
+          {/* Editor — sits on the board gradient, white text, white inputs */}
+          <div style={{ background: C.boardGradient, borderRadius: 14, padding: 18 }}>
             <div style={{ marginBottom: 14 }}>
               <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink, textDecoration: "underline", textDecorationColor: C.lineSoft, textUnderlineOffset: 3 }}>
+                <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: "#fff", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.4)", textUnderlineOffset: 3 }}>
                   {client.company || client.name}
                 </button>
                 {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
@@ -2149,10 +2182,10 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
                   Done ✓
                 </button>
               </div>
-              <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
             </div>
             {/* Sending auto-dismisses the card, so move straight to the next recipient. */}
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog}
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} dark
               officeSiblings={client.officeGroup ? clients.filter((o) => o.id !== client.id && o.officeGroup === client.officeGroup) : []} />
           </div>
         </div>
@@ -2319,9 +2352,10 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
   const awaitingReply = activeC.filter((c) => c.stage === "contacted-awaiting");
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);
   const oldPricing = clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
-  const Row = ({ n, label, tint, to }) => (
-    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 14px", cursor: "pointer" }}>
-      <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 13, color: "#fff", background: n > 0 ? tint : C.grey, width: 28, height: 28, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
+  // Pill-left / square-right row: the box's left end is fully round so it hugs the count circle
+  const Row = ({ n, label, to }) => (
+    <button onClick={() => onGo(to)} className="flex items-center" style={{ width: "100%", textAlign: "left", gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: "24px 0 0 24px", padding: "4px 14px 4px 4px", cursor: "pointer" }}>
+      <span style={{ fontFamily: MONO, fontWeight: 700, fontSize: 15, color: "#fff", background: C.boardGradient, width: 38, height: 38, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{n}</span>
       <span style={{ fontSize: 13.5 }}>{label}</span>
     </button>
   );
@@ -3400,10 +3434,10 @@ function Tab({ active, onClick, children }) {
       fontSize: 13.5, fontWeight: 600, padding: active ? "10px 18px 11px" : "8px 16px", cursor: "pointer",
       border: `1px solid ${C.line}`, borderBottom: "none",
       borderRadius: "10px 10px 0 0",
-      background: active ? C.paper : C.line,
+      background: active ? C.paper : "linear-gradient(to bottom, #CDD5E2 0%, #AEB8C9 100%)",
       color: active ? C.ink : C.sub,
       marginBottom: -1, position: "relative", top: active ? 0 : 2,
-      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -4px 6px -4px rgba(34,48,76,0.22)",
+      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -7px 9px -4px rgba(22,48,95,0.45)",
       transition: "all 0.12s ease-out", zIndex: active ? 2 : 1,
     }}>
       {children}
@@ -3437,7 +3471,7 @@ function ToggleSwitch({ checked, onChange, label }) {
     </label>
   );
 }
-function Field({ label, children }) { return <label style={{ display: "block", marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: C.sub, display: "block", marginBottom: 4 }}>{label}</span>{children}</label>; }
+function Field({ label, children, dark }) { return <label style={{ display: "block", marginBottom: 10 }}><span style={{ fontSize: 12, fontWeight: 600, color: dark ? "rgba(255,255,255,0.85)" : C.sub, display: "block", marginBottom: 4 }}>{label}</span>{children}</label>; }
 // Editable credential field with a one-tap copy button (copies just this value).
 function CredField({ label, value, onChange, placeholder }) {
   const [copied, setCopied] = useState(false);

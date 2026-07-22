@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
-import { readState, encryptClients, mirrorClients } from "../../../../lib/clients.js";
+import { updateState } from "../../../../lib/clients.js";
 import { encStr, encryptionActive } from "../../../../lib/crypto.js";
 import { writeAudit } from "../../../../lib/security.js";
 
@@ -17,12 +17,11 @@ export async function POST(req) {
   }
   const db = await getDb();
 
-  // Clients: re-encrypt every client's scalar secrets in the blob + rows.
-  const state = await readState(db);
-  const enc = encryptClients(state.clients);
-  const newVal = JSON.stringify({ clients: enc, settings: state.settings || {}, rev: (state.rev || 0) + 1 });
-  await db.query("INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [newVal]);
-  await mirrorClients(db, enc);
+  // Clients: re-encrypt every client's scalar secrets (updateState calls
+  // encryptClients on the way in; idempotent). Guarded so it can't clobber a
+  // concurrent UI save.
+  let clientCount = 0;
+  await updateState(db, (state) => { clientCount = (state.clients || []).length; return { clients: state.clients }; });
 
   // Users: encrypt any plaintext visible_password.
   const { rows } = await db.query("SELECT id, visible_password FROM users WHERE visible_password IS NOT NULL AND visible_password <> ''");
@@ -33,6 +32,6 @@ export async function POST(req) {
     users++;
   }
 
-  await writeAudit({ actorId: me.id, actorEmail: me.email, action: "secrets.encrypted", detail: `${enc.length} clients, ${users} user passwords`, req });
-  return NextResponse.json({ ok: true, clients: enc.length, usersEncrypted: users });
+  await writeAudit({ actorId: me.id, actorEmail: me.email, action: "secrets.encrypted", detail: `${clientCount} clients, ${users} user passwords`, req });
+  return NextResponse.json({ ok: true, clients: clientCount, usersEncrypted: users });
 }

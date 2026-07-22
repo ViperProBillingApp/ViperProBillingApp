@@ -44,10 +44,13 @@ async function runDaily(forceEmail = false) {
 
   const cur = (state.settings || {}).currency || "GBP";
   const owed = topOwed(active, 10);
+  // Never sum across currencies — show each currency's owed total separately
+  // (a single £-labelled figure that added USD + EUR would be wrong).
+  const owedStr = Object.entries(k.owedByCur || {}).filter(([, v]) => v > 0).map(([c, v]) => fmtMoney(v, c)).join(" + ") || fmtMoney(0, cur);
   const kpi = (label, value) => `<tr><td style="padding:4px 16px 4px 0;color:#58585A">${label}</td><td style="padding:4px 0;font-weight:600">${value}</td></tr>`;
   const html = `<p>Good morning — here is where things stand as of ${k.date}.</p>
 <table style="border-collapse:collapse">
-${kpi("Total owed", fmtMoney(k.totalOwed, cur))}
+${kpi("Total owed", owedStr)}
 ${kpi("Clients in arrears", String(k.overdue))}
 ${kpi("Final notice (3+ periods)", String(k.finalNotice))}
 ${kpi("Not up to date (ChargeOver)", String(k.notUpToDate))}
@@ -62,7 +65,7 @@ ${owed.length ? `<p style="margin-top:16px"><strong>Largest balances</strong></p
 <p style="margin-top:16px"><a href="https://viper-pro-billing-app.vercel.app">Open ViperPro</a></p>
 <p>Best,<br>ViperPro Accounting Team</p>`;
 
-  const emailed = await sendDigestEmail(staff.map((u) => ({ email: u.email, name: u.name || "" })), `ViperPro weekly digest — ${fmtMoney(k.totalOwed, cur)} owed, ${k.overdue} in arrears`, html);
+  const emailed = await sendDigestEmail(staff.map((u) => ({ email: u.email, name: u.name || "" })), `ViperPro weekly digest — ${owedStr} owed, ${k.overdue} in arrears`, html);
   return { ok: true, snapshot: k.date, emailed, recipients: staff.length, backup };
 }
 

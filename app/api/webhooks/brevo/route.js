@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import crypto from "crypto";
 import { getDb } from "../../../../lib/db.js";
-import { mirrorClients, readState, encryptClients } from "../../../../lib/clients.js";
+import { updateState } from "../../../../lib/clients.js";
 
 // Brevo transactional event webhook → flag the matching client's email as bad.
 // Public, unauthenticated route by nature — guarded by a shared secret Brevo
@@ -15,7 +16,10 @@ const SOFT_EVENTS = new Set(["soft_bounce", "deferred"]);
 function authorized(req) {
   const want = process.env.BREVO_WEBHOOK_SECRET;
   if (!want) return false; // not configured = closed
-  return req.headers.get("x-brevo-secret") === want;
+  const got = req.headers.get("x-brevo-secret") || "";
+  // constant-time compare; equal-length buffers required, so guard length first
+  const a = Buffer.from(got), b = Buffer.from(want);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export async function POST(req) {
@@ -33,25 +37,22 @@ export async function POST(req) {
   if (!status && !optOut) return NextResponse.json({ ok: true, ignored: event });
 
   const db = await getDb();
-  const state = await readState(db); // F-08 Phase 3: clients from rows
-
   let matched = 0;
-  for (const c of state.clients || []) {
-    if ((c.email || "").trim().toLowerCase() !== email) continue;
-    matched++;
-    if (status) c.emailStatus = status;
-    if (optOut && !(c.tags || []).includes("opted-out")) c.tags = [...(c.tags || []), "opted-out"];
-    c.activity = [
-      { at: new Date().toISOString(), type: "email", text: `Brevo: ${event} for ${email}` },
-      ...(c.activity || []),
-    ].slice(0, 200);
-  }
-  if (matched) {
-    state.rev = (state.rev || 0) + 1; // open tabs must reload before saving over this
-    state.clients = encryptClients(state.clients); // F-01: encrypt at rest
-    await db.query("UPDATE kv SET value = $1 WHERE key = 'state'", [JSON.stringify(state)]);
-    await mirrorClients(db, state.clients); // F-08 dark shadow
-  }
+  // Guarded write: re-applies against fresh state if a UI save lands concurrently.
+  await updateState(db, (state) => {
+    matched = 0;
+    for (const c of state.clients || []) {
+      if ((c.email || "").trim().toLowerCase() !== email) continue;
+      matched++;
+      if (status) c.emailStatus = status;
+      if (optOut && !(c.tags || []).includes("opted-out")) c.tags = [...(c.tags || []), "opted-out"];
+      c.activity = [
+        { at: new Date().toISOString(), type: "email", text: `Brevo: ${event} for ${email}` },
+        ...(c.activity || []),
+      ].slice(0, 200);
+    }
+    return matched ? { clients: state.clients } : null; // no match → skip write
+  });
   return NextResponse.json({ ok: true, event, matched });
 }
 

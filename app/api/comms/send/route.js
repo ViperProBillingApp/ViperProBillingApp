@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { sendClientEmail } from "../../../../lib/email.js";
+import { rateLimit } from "../../../../lib/security.js";
 
 // Review-first send: the UI shows the full email and staff click Send per
-// client — this route sends exactly one message, no bulk endpoint on purpose.
+// client — this route sends one message per click. A per-user cap stops a
+// hijacked session from turning the trusted sender into a spam relay.
 export async function POST(req) {
   const me = await getSessionUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  const { limited } = await rateLimit(`comms:${me.id}`, 200, 60 * 60 * 1000);
+  if (limited) return NextResponse.json({ error: "Send limit reached for this hour — pause and resume shortly." }, { status: 429 });
   const { to, name, subject, body, recipients, cc, from } = await req.json().catch(() => ({}));
   const okEmail = (e) => /^\S+@\S+\.\S+$/.test(String(e || ""));
   const normList = (arr, cap) => arr

@@ -89,7 +89,10 @@ function iso(d = new Date()) { return `${d.getFullYear()}-${pad(d.getMonth() + 1
 function monthsAgo(n, day = 5) { const d = new Date(); d.setMonth(d.getMonth() - n); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(day)}`; }
 function periodKey(date = new Date()) { return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`; }
 function monthName(date = new Date()) { return date.toLocaleString("en-GB", { month: "long", year: "numeric" }); }
-function parseDate(s) { if (!s) return null; const d = new Date(s); return isNaN(d.getTime()) ? null : d; }
+// A bare "YYYY-MM-DD" is parsed as LOCAL midnight, not UTC — else it renders a
+// day early in western timezones (the business runs in US Mountain time). Full
+// ISO timestamps (with a T) keep their exact instant.
+function parseDate(s) { if (!s) return null; const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s); return isNaN(d.getTime()) ? null : d; }
 function fmtDate(s) { const d = parseDate(s); return d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"; }
 function money(a, cur) { return `${SYMBOL[cur] || "£"}${(Number(a) || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`; }
 function firstName(n) { return (n || "there").trim().split(/\s+/)[0]; }
@@ -291,6 +294,9 @@ function normalise(r) {
     formerCustomer: !!r.formerCustomer,
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
+    // the standalone "<Name> (Group)" billing card, not a real office — excluded from the office count.
+    // Self-heal for cards created before this field existed: a group-master whose company ends in "(Group)".
+    syntheticGroup: r.syntheticGroup !== undefined ? !!r.syntheticGroup : (!!r.groupBillingMaster && /\(Group\)\s*$/.test(r.company || "")),
     officeGroup: (r.officeGroup || "").trim(), // the group brand that links offices together
     emailPrimaryOnly: !!r.emailPrimaryOnly, // group master: email only this card's contact, not every office's
     viperCadence: r.viperCadence === "annual" ? "annual" : "monthly", // Viper subscription: monthly vs annual-in-advance pricing
@@ -508,22 +514,36 @@ export default function CRM({ user }) {
         if (r.status === 409) {
           // Rev moved outside this tab (nightly ChargeOver sync, another tab or
           // staff member saving). Auto-rebase instead of freezing: adopt server
-          // state, overlay this tab's unsaved client edits, and let the effect
-          // re-fire to save the diff against the new rev. Unsaved local DELETES
-          // are dropped by a rebase (the server copy comes back) — the safe
+          // state, re-overlay THIS tab's still-unsaved edits (recomputed at apply
+          // time so keystrokes made during the fetch aren't lost), and let the
+          // effect re-fire to save the diff against the new rev. Unsaved local
+          // DELETES are dropped by a rebase (server copy returns) — the safe
           // direction. The "stale" freeze remains only if the re-fetch fails.
           try {
             const sr = await fetch("/api/state");
             if (!sr.ok) { setSaveState("stale"); return; }
             const sd = await sr.json();
             const server = (Array.isArray(sd.clients) ? sd.clients : []).map(normalise);
-            const localEdits = new Map(upserts.map((c) => [c.id, c]));
-            const serverIds = new Set(server.map((c) => c.id));
-            const merged = server.map((c) => localEdits.get(c.id) || c);
-            upserts.forEach((c) => { if (!serverIds.has(c.id)) merged.push(c); }); // clients this tab created
+            const serverById = new Map(server.map((c) => [c.id, c]));
+            const serverIds = new Set(serverById.keys());
             revRef.current = sd.rev || 0;
             baselineRef.current = new Map(server.map((c) => [c.id, JSON.stringify(c)]));
-            setClients(merged);
+            // Recompute local dirty set against the CURRENT client state, not the
+            // stale `upserts` snapshot — this preserves edits typed mid-fetch.
+            setClients((cur) => {
+              const dirty = new Map(cur.filter((c) => base.get(c.id) !== JSON.stringify(c)).map((c) => [c.id, c]));
+              const merged = server.map((c) => dirty.get(c.id) || c);
+              cur.forEach((c) => { if (!serverIds.has(c.id) && dirty.has(c.id)) merged.push(c); }); // clients this tab created, still unsaved
+              return merged;
+            });
+            // Settings: if this tab has no unsaved settings edits, adopt the
+            // server's (so we don't re-send a stale settings blob and wipe
+            // campaign/template/pricing changes made elsewhere). If it DOES have
+            // local settings edits, keep them — the retry will save them.
+            if (!settingsChanged && sd.settings) {
+              setSettings(sd.settings);
+              settingsBaseRef.current = JSON.stringify(sd.settings);
+            }
           } catch { setSaveState("stale"); }
           return;
         }
@@ -554,22 +574,47 @@ export default function CRM({ user }) {
   // merge made the new office "disappear" into its sibling.
   const addClients = useCallback((rows, { merge = true } = {}) => {
     setClients((prev) => {
-      // NEVER rebuild the list through a map keyed on email: offices in a
-      // group share one billing email, and a keyed rebuild collapses them to
-      // one record — the diff-save then deletes the siblings from the DB.
+      // Append/merge in place — NEVER rebuild the list through one keyed map:
+      // offices in a group share one billing email, and a keyed rebuild would
+      // collapse them into a single record (the diff-save then deletes the rest).
       const next = [...prev];
-      const idx = new Map(); // dedupe key -> index of first occurrence
-      next.forEach((c, i) => { const k = c.chargeoverId || (c.email || "").toLowerCase(); if (k && !idx.has(k)) idx.set(k, i); });
+      // Index existing clients under BOTH keys + id so a synced client (which has
+      // a ChargeOver id) still matches an email-only CSV row, and a JSON backup
+      // row matches by its explicit id — otherwise re-imports create duplicates.
+      const byId = new Map(), byCo = new Map(), byEmail = new Map();
+      next.forEach((c, i) => {
+        byId.set(c.id, i);
+        if (c.chargeoverId) byCo.set(String(c.chargeoverId), i);
+        if (c.email) { const e = c.email.toLowerCase(); if (!byEmail.has(e)) byEmail.set(e, i); }
+      });
+      const present = (v) => v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && v.length === 0);
       for (const r of rows) {
         const clean = normalise(r);
         if (!clean.name && !clean.company && !clean.email) continue; // truly empty row
-        const key = clean.chargeoverId || clean.email.toLowerCase();
-        if (merge && key && idx.has(key)) {
-          const ex = next[idx.get(key)];
-          next[idx.get(key)] = { ...ex, ...clean, id: ex.id, reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity, payments: clean.payments.length ? clean.payments : ex.payments, noteCards: clean.noteCards.length ? [...clean.noteCards, ...(ex.noteCards || [])] : ex.noteCards };
+        let i = -1;
+        if (r.id && byId.has(clean.id)) i = byId.get(clean.id);
+        if (i === -1 && merge && clean.chargeoverId && byCo.has(String(clean.chargeoverId))) i = byCo.get(String(clean.chargeoverId));
+        if (i === -1 && merge && clean.email && byEmail.has(clean.email.toLowerCase())) i = byEmail.get(clean.email.toLowerCase());
+        if (i !== -1) {
+          const ex = next[i];
+          // Sparse merge: overwrite ONLY fields the source row actually provided
+          // (non-empty). A CSV that omits a column must not reset owner, group
+          // structure, portal URLs, coBalance, createdAt, etc. to defaults.
+          const patch = {};
+          for (const k of Object.keys(clean)) { if (k === "id" || k === "noteCards") continue; if (present(r[k])) patch[k] = clean[k]; }
+          // Notes: append only genuinely new note text, so re-imports don't duplicate.
+          const exCards = ex.noteCards || [];
+          const seen = new Set(exCards.map((n) => (n.text || "").trim()));
+          const freshNotes = (clean.noteCards || []).filter((n) => n.text && !seen.has(n.text.trim()));
+          next[i] = { ...ex, ...patch, id: ex.id,
+            reminders: ex.reminders, archivedContacts: ex.archivedContacts, candidates: ex.candidates, activity: ex.activity,
+            payments: present(r.payments) ? clean.payments : ex.payments,
+            noteCards: freshNotes.length ? [...freshNotes, ...exCards] : exCards };
         } else {
-          next.push(clean);
-          if (key && !idx.has(key)) idx.set(key, next.length - 1);
+          const idx = next.push(clean) - 1;
+          byId.set(clean.id, idx);
+          if (clean.chargeoverId) byCo.set(String(clean.chargeoverId), idx);
+          if (clean.email) { const e = clean.email.toLowerCase(); if (!byEmail.has(e)) byEmail.set(e, idx); }
         }
       }
       return next;
@@ -582,9 +627,10 @@ export default function CRM({ user }) {
     setClients((p) => p.map((c) => {
       if (c.id !== id) return c;
       // Stage changes stamp stageAt (10-day bounce-back clock); reaching
-      // "Up to date" also removes the card from the workflow board.
+      // "Up to date" hides the card from the board, and moving BACK off it
+      // un-hides — else a re-activated client silently stays off the board.
       const stageExtras = patch.stage && patch.stage !== c.stage
-        ? { stageAt: new Date().toISOString(), ...(patch.stage === "up-to-date" ? { workflowHidden: true } : {}) }
+        ? { stageAt: new Date().toISOString(), workflowHidden: patch.stage === "up-to-date" }
         : {};
       return { ...c, ...patch, ...stageExtras, activity: logActivity(c, type, text) };
     }));
@@ -716,7 +762,7 @@ export default function CRM({ user }) {
       </div>
       </main>
 
-      {detail && <DetailDrawer client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
+      {detail && <DetailDrawer key={detail.id} client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
         officeSiblings={detail.officeGroup ? clients.filter((c) => c.id !== detail.id && c.officeGroup === detail.officeGroup) : []} allClients={clients} onOpen={setDetailId}
@@ -1629,6 +1675,9 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
     const r = await fetch(url, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
     return r.ok ? r.json().catch(() => null) : null;
   };
+  // Re-pull the board from the server — used to undo an optimistic update whose
+  // write failed, so the UI never shows a lane/state the DB doesn't have.
+  const reload = () => fetch("/api/tasks").then((r) => r.json()).then((d) => setTasks(d.tasks || [])).catch(() => {});
   const create = async (lane) => {
     const title = draft.trim();
     setAddingLane(null); setDraft("");
@@ -1642,9 +1691,14 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
   };
   const move = async (id, lane) => {
     setTasks((t) => t.map((x) => (x.id === id ? { ...x, lane } : x))); // optimistic
-    save(id, { lane });
+    const d = await api(`/api/tasks/${id}`, "PATCH", { lane });
+    if (d?.task) setTasks((t) => t.map((x) => (x.id === id ? d.task : x))); else reload(); // failed → resync
   };
-  const del = async (id) => { setTasks((t) => t.filter((x) => x.id !== id)); setEditing(null); await api(`/api/tasks/${id}`, "DELETE"); };
+  const del = async (id) => {
+    setTasks((t) => t.filter((x) => x.id !== id)); setEditing(null); // optimistic
+    const r = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    if (!r.ok) reload(); // failed → bring it back
+  };
   const drop = (e, lane) => { e.preventDefault(); setDragOver(null); const id = e.dataTransfer.getData("text/plain"); if (id) move(id, lane); };
 
   return (
@@ -1732,7 +1786,7 @@ function AssignButton({ owner, staff, staffByEmail, onAssign, size = 18 }) {
 function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssign, onDelete, onDragStart }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const lbl = TASK_LABELS[task.label];
-  const overdue = task.due && task.lane !== "done" && new Date(task.due) < new Date(new Date().toDateString());
+  const overdue = task.due && task.lane !== "done" && task.due < iso(); // string compare — a task due today is not overdue
   const cl = parseChecklist(task.checklist);
   const clDone = cl.filter(([, d]) => d).length;
   const iconBtn = { background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1, display: "inline-flex" };
@@ -1886,6 +1940,11 @@ function RecoveryTab({ bounced, onApply, onUpdate, onOpen }) {
 function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [resendCand, setResendCand] = useState(null); // candidate we're previewing a resend to
+  // The most recent email actually sent to this client (the one that bounced) — reused as the resend draft.
+  const lastComm = useMemo(() => Object.values(client.reminders || {})
+    .filter((v) => v.sentAt && (v.subject || v.body))
+    .sort((a, b) => new Date(b.sentAt) - new Date(a.sentAt))[0] || null, [client.reminders]);
   const run = async () => {
     setBusy(true); setErr("");
     try {
@@ -1922,13 +1981,76 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
                 <div style={{ fontSize: 13, fontFamily: MONO, fontWeight: 600 }}>{cand.email || "—"}{cand.phone ? ` · ${cand.phone}` : ""}</div>
                 <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>{cand.note} · source: {cand.source}<span style={{ marginLeft: 8, color: conf[cand.confidence] || C.grey, fontWeight: 600 }}>{cand.confidence} confidence</span></div>
               </div>
-              <button onClick={() => onApply(client.id, cand)} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>Apply & archive old</button>
+              <div className="flex items-center" style={{ gap: 8 }}>
+                {/* Resend the bounced email to this candidate — preview first, doesn't change the record */}
+                <button onClick={() => setResendCand(cand)} disabled={!cand.email || !lastComm}
+                  title={!cand.email ? "No email for this contact" : !lastComm ? "No previous email to resend" : "Preview & resend the last email to this contact"}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: cand.email && lastComm ? C.action : C.faint, cursor: cand.email && lastComm ? "pointer" : "default", whiteSpace: "nowrap" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
+                  Resend
+                </button>
+                <button onClick={() => onApply(client.id, cand)} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>Apply & archive old</button>
+              </div>
             </div>
           ))}
         </div>
       )}
       {client.archivedContacts?.length > 0 && <div style={{ fontSize: 11, color: C.faint, marginTop: 10 }}>Archived: {client.archivedContacts.map((a) => a.email).join(", ")}</div>}
+      {resendCand && <ResendModal client={client} cand={resendCand} lastComm={lastComm} onClose={() => setResendCand(null)}
+        onLog={(text) => onUpdate(client.id, { activity: logActivity(client, "contact", text) })} />}
     </div>
+  );
+}
+
+// Preview + resend the last (bounced) email to a recovered contact. Sends via the
+// same route the composer uses; does NOT change the client's stored contact — the
+// separate "Apply & archive old" button is still how you adopt the new address.
+function ResendModal({ client, cand, lastComm, onClose, onLog }) {
+  const [subject, setSubject] = useState(lastComm?.subject || "");
+  const [body, setBody] = useState(lastComm?.body || "");
+  const [state, setState] = useState({ busy: false, err: "", done: false });
+  const sendNow = async () => {
+    if (!cand.email) { setState({ busy: false, err: "This contact has no email.", done: false }); return; }
+    setState({ busy: true, err: "", done: false });
+    try {
+      const r = await fetch("/api/comms/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipients: [{ email: cand.email }], subject, body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setState({ busy: false, err: d.error || "Send failed.", done: false }); return; }
+      onLog?.(`Resent “${lastComm?.label || "last email"}” to recovered contact ${cand.email}`);
+      setState({ busy: false, err: "", done: true });
+    } catch { setState({ busy: false, err: "Send failed — try again.", done: false }); }
+  };
+  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: 8, padding: "8px 11px" };
+  return (
+    <Modal title={`Resend to ${cand.email || "contact"}`} onClose={onClose} blueHeader tall>
+      {!lastComm && <div style={{ fontSize: 13, color: C.sub, marginBottom: 12 }}>No previously-sent email to resend.</div>}
+      <Field label="To"><div style={ro}>{cand.email || "—"}</div></Field>
+      <Field label="From"><div style={ro}>{FROM_EMAIL}</div></Field>
+      <Field label="Subject"><input style={inputStyle} value={subject} onChange={(e) => setSubject(e.target.value)} /></Field>
+      <Field label={`Message${lastComm?.sentAt ? ` · originally sent ${fmtDate(lastComm.sentAt)}` : ""}`}>
+        <textarea rows={9} style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => setBody(e.target.value)} />
+      </Field>
+      <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 12 }}>Your signature is appended automatically. Sending here does not change this client's saved contact — use “Apply &amp; archive old” for that.</p>
+      <div className="flex items-center" style={{ gap: 10 }}>
+        {state.done ? (
+          <>
+            <span style={{ fontSize: 13, color: C.green, fontWeight: 600 }}>✓ Sent to {cand.email}</span>
+            <GhostBtn onClick={onClose}>Close</GhostBtn>
+          </>
+        ) : (
+          <>
+            <button onClick={sendNow} disabled={state.busy || !cand.email} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: state.busy || !cand.email ? C.grey : C.action, color: "#fff", cursor: state.busy || !cand.email ? "default" : "pointer" }}>
+              {state.busy ? "Sending…" : "Send via Brevo"}
+            </button>
+            <GhostBtn onClick={onClose}>Cancel</GhostBtn>
+            {state.err && <span style={{ fontSize: 12, color: C.red }}>{state.err}</span>}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 
@@ -2499,7 +2621,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
         segment: "maritz-portal", billingStatus: "never-charged", stage: "not-contacted",
         tags: [], amount: tier.m, billingDay: 1, cadence: "monthly", currency: "",
         maritzPortal: true, viperCustomer: false, inChargeOver: false,
-        multiOffice: true, officeGroup: name, priceMode: "group", groupBillingMaster: true, emailPrimaryOnly: false,
+        multiOffice: true, officeGroup: name, priceMode: "group", groupBillingMaster: true, syntheticGroup: true, emailPrimaryOnly: false,
         secondaryContacts: [], payments: [], reminders: {}, noteCards: [], followUp: "", emailStatus: "ok",
         activity: [{ at: new Date().toISOString(), type: "group", text: `Group billing card created for ${memberIds.length} “${name}” offices — new billing history starts here` }],
         createdAt: iso(),
@@ -2514,7 +2636,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
   const setPricingMode = (mode) => {
     if (!client.multiOffice) { set({ priceMode: mode }); return; }
     if (mode === "group") {
-      const tier = groupTierFor([client, ...officeSiblings].filter((o) => !o.groupBillingMaster).length, settings.maritzGroupTiers || GROUP_TIER_DEFAULTS);
+      const tier = groupTierFor([client, ...officeSiblings].filter((o) => !o.syntheticGroup).length, settings.maritzGroupTiers || GROUP_TIER_DEFAULTS);
       onUpdate(client.id, { priceMode: "group", groupBillingMaster: true, amount: client.cadence === "annual" ? tier.y : tier.m });
       officeSiblings.forEach((o) => onUpdate(o.id, { priceMode: "group", groupBillingMaster: false }));
     } else {
@@ -3235,7 +3357,9 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
     navigator.clipboard?.writeText(names.join("\n")).then(() => { setCopiedNames(true); setTimeout(() => setCopiedNames(false), 1600); });
   };
   // Count real offices only — the "(Group)" billing card itself is not an office
-  const count = [client, ...officeSiblings].filter((o) => !o.groupBillingMaster).length;
+  // Count real offices only — exclude the synthetic "(Group)" billing card, but
+  // NOT a real office that happens to be the billing master (setPricingMode path).
+  const count = [client, ...officeSiblings].filter((o) => !o.syntheticGroup).length;
   const tier = groupTierFor(count, tiers);
   const isGroup = client.priceMode === "group";
   const master = isGroup && client.groupBillingMaster;

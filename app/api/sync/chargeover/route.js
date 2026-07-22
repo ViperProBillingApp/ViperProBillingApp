@@ -2,25 +2,28 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
-import { mirrorClients, readState, encryptClients } from "../../../../lib/clients.js";
+import { updateState } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
 export const maxDuration = 60;
 
 async function runSync() {
   const db = await getDb();
-  const state = await readState(db); // F-08 Phase 3: clients from rows
+  // Slow network work OUTSIDE the guarded write, so retries don't re-fetch.
   const customers = await fetchAllCustomers();
   const overdue = await fetchOverdueMap().catch(() => null); // best-effort; falls back to raw balance
-  const { clients, added, updated } = mergeCustomers(state, customers.map(mapCustomer), overdue);
-  const { filled, remaining } = await backfillRecurringAmounts(clients);
-  // bump the rev so open tabs holding pre-sync state can't clobber the sync
-  const next = { clients: encryptClients(clients), settings: state.settings || {}, rev: (state.rev || 0) + 1 }; // F-01: encrypt at rest
-  await db.query(
-    "INSERT INTO kv (key, value) VALUES ('state', $1) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-    [JSON.stringify(next)]
-  );
-  await mirrorClients(db, next.clients); // F-08 dark shadow
+  const mapped = customers.map(mapCustomer);
+  let added = 0, updated = 0, filled = 0, remaining = 0;
+  // Merge + backfill INSIDE updateState so it re-applies against fresh state if
+  // a UI save lands during the sync — the merge no longer clobbers that save.
+  const res = await updateState(db, async (state) => {
+    const merged = mergeCustomers(state, mapped, overdue);
+    added = merged.added; updated = merged.updated;
+    const bf = await backfillRecurringAmounts(merged.clients);
+    filled = bf.filled; remaining = bf.remaining;
+    return { clients: merged.clients, settings: state.settings || {} };
+  });
+  if (!res.ok) return { ok: false, error: "Sync could not commit after repeated concurrent saves — try again." };
   return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining };
 }
 

@@ -8,7 +8,7 @@ if (!process.env.DATABASE_URL) {
 }
 
 const { getDb } = await import("../lib/db.js");
-const { saveMessages, listReplies, markHandled, assignToClient, outboundMessageIdIndex } =
+const { saveMessages, listReplies, markHandled, assignToClient, outboundMessageIdIndex, clientRowExists } =
   await import("../lib/emailstore.js");
 
 const db = await getDb();
@@ -61,6 +61,11 @@ try {
   })]);
   const index = await outboundMessageIdIndex(db);
   assert.strictEqual(index.get(`<${C}@example.com>`), "test-client", "outbound row is indexed by its Message-ID header");
+
+  // clientRowExists guards the assign-to-client bug: a nonexistent id must not
+  // pass, since client_id has no foreign key to catch it at the DB level.
+  assert.strictEqual(await clientRowExists(db, "definitely-not-a-real-client-id"), false,
+    "clientRowExists is false for an id that doesn't exist");
 
   console.log("check-emailstore: OK");
 } catch (e) {

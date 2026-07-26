@@ -8,12 +8,13 @@ if (!process.env.DATABASE_URL) {
 }
 
 const { getDb } = await import("../lib/db.js");
-const { saveMessages, listReplies, markHandled, assignToClient } =
+const { saveMessages, listReplies, markHandled, assignToClient, outboundMessageIdIndex } =
   await import("../lib/emailstore.js");
 
 const db = await getDb();
 const A = "test-msg-a-" + Date.now();
 const B = "test-msg-b-" + Date.now();
+const C = "test-msg-c-" + Date.now();
 
 let failure = null;
 try {
@@ -51,12 +52,19 @@ try {
   got = await listReplies(db, { scope: "unmatched" });
   assert.ok(!got.some((r) => r.id === B), "assigning removes it from unmatched");
 
+  // outbound index: header-matching tier of the reply cascade reads this
+  await saveMessages(db, [row(C, {
+    direction: "out", clientId: "test-client", messageIdHdr: `<${C}@example.com>`,
+  })]);
+  const index = await outboundMessageIdIndex(db);
+  assert.strictEqual(index.get(`<${C}@example.com>`), "test-client", "outbound row is indexed by its Message-ID header");
+
   console.log("check-emailstore: OK");
 } catch (e) {
   failure = e;
 } finally {
   // cleanup must not mask the original failure
-  await db.query("DELETE FROM email_messages WHERE id = ANY($1)", [[A, B]]).catch((e) => console.error("cleanup failed:", e.message));
+  await db.query("DELETE FROM email_messages WHERE id = ANY($1)", [[A, B, C]]).catch((e) => console.error("cleanup failed:", e.message));
   if (failure) { console.error(failure); process.exit(1); }
   process.exit(0);
 }

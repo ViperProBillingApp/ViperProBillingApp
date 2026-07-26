@@ -34,7 +34,7 @@ const STAGES = {
   "not-contacted": { label: "Not contacted", color: "#8A94A6", order: 0 },
   "need-to-contact": { label: "Need to contact", color: C.amber, order: 1 },
   "contacted-awaiting": { label: "Contacted · awaiting reply", color: "#3B5BA5", order: 2 },
-  "replied": { label: "Replied · needs action", color: "#7A4FB5", order: 2.5 },
+  "replied": { label: "Replied · needs action", color: "#8A5CD1", order: 2.5 },
   "up-to-date": { label: "Up to date", color: C.green, order: 3 },
   "on-hold": { label: "On hold", color: "#7A4FB5", order: 4 },
   "marked-deletion": { label: "Marked for deletion", color: C.red, order: 5 },

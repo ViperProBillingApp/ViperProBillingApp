@@ -98,7 +98,11 @@ Vercel; direct host is IPv6-only and unreachable), `ENCRYPTION_KEY`, `CRON_SECRE
 `BREVO_API_KEY` (`xkeysib-…`, NOT the smtp key), `BREVO_WEBHOOK_SECRET`,
 `CHARGEOVER_PUBLIC_KEY`/`CHARGEOVER_PRIVATE_KEY`, `CHARGEOVER_SUBDOMAIN`,
 `ANTHROPIC_API_KEY` (contact recovery), `APP_URL`. Optional: `DATABASE_CA`
-(turns on TLS cert verification — F-12).
+(turns on TLS cert verification — F-12). Optional: `REPLY_INBOX_USER` /
+`REPLY_INBOX_DOMAIN` — the reply-token mailbox for the (not-yet-built) Gmail
+reply-inbox feature. Both must be set together to activate; leaving either
+unset means chases carry no Reply-To override, so replies keep landing in the
+accounting@ group exactly as they do today.
 
 ## Verify + deploy workflow
 

@@ -3,12 +3,14 @@ import { getSessionUser } from "../../../../lib/auth.js";
 import { sendClientEmail } from "../../../../lib/email.js";
 import { rateLimit } from "../../../../lib/security.js";
 import { mintReplyToken } from "../../../../lib/replytoken.js";
+import { saveMessages } from "../../../../lib/emailstore.js";
+import { getDb } from "../../../../lib/db.js";
 
-// Where client replies are collected. Split so the local part can carry the
-// +crm-<token> suffix. Moving to a dedicated service mailbox later is a config
-// change here, nothing more.
-const REPLY_INBOX_USER = process.env.REPLY_INBOX_USER || "droffey";
-const REPLY_INBOX_DOMAIN = process.env.REPLY_INBOX_DOMAIN || "vipeventresources.com";
+// Where client replies are collected. Both must be set explicitly — until the
+// Gmail side is configured, chases go out with no Reply-To override so replies
+// keep landing in the accounting@ group exactly as they do today.
+const REPLY_INBOX_USER = process.env.REPLY_INBOX_USER || "";
+const REPLY_INBOX_DOMAIN = process.env.REPLY_INBOX_DOMAIN || "";
 
 // Review-first send: the UI shows the full email and staff click Send per
 // client — this route sends one message per click. A per-user cap stops a
@@ -39,7 +41,7 @@ export async function POST(req) {
   // Signed reply token so the client's reply can be attributed on the way back in.
   // Fails closed: no key or no clientId means no token, and matching falls back
   // to headers/sender rather than emitting something unsigned.
-  const token = clientId ? mintReplyToken(String(clientId)) : null;
+  const token = (clientId && REPLY_INBOX_USER && REPLY_INBOX_DOMAIN) ? mintReplyToken(String(clientId)) : null;
   const replyTo = token ? `${REPLY_INBOX_USER}+crm-${token}@${REPLY_INBOX_DOMAIN}` : undefined;
 
   // sender's uploaded signature image rides along on every outgoing template
@@ -49,5 +51,35 @@ export async function POST(req) {
     { cc: ccList || undefined, from: from || undefined, replyTo }
   );
   if (!sent.ok) return NextResponse.json({ error: "Send failed — Brevo not configured or rejected the message." }, { status: 502 });
+
+  // Feed the header-matching tier of the reply cascade (lib/replies.js step 2):
+  // it looks up inbound In-Reply-To/References against this row's messageIdHdr.
+  // Best-effort only — the email is already gone, so a DB hiccup here must not
+  // turn a successful send into an error response staff would act on by resending.
+  if (clientId && sent.messageId) {
+    try {
+      const db = await getDb();
+      const firstTo = list ? list[0].email : String(to);
+      await saveMessages(db, [{
+        id: sent.messageId,
+        threadId: sent.messageId,
+        clientId: String(clientId),
+        direction: "out",
+        fromEmail: from || "accounting@vipeventresources.com",
+        toEmail: firstTo,
+        subject: String(subject),
+        snippet: String(body).slice(0, 200),
+        bodyText: String(body),
+        messageIdHdr: sent.messageId,
+        referencesHdr: "",
+        sentAt: new Date().toISOString(),
+        matchMethod: null,
+        matchConf: null,
+      }]);
+    } catch (e) {
+      console.error("comms/send: failed to record outbound email_messages row:", e.message);
+    }
+  }
+
   return NextResponse.json({ ok: true, messageId: sent.messageId });
 }

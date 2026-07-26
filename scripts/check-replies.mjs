@@ -30,4 +30,66 @@ assert.strictEqual(
 assert.strictEqual(tokenFromAddress("droffey@vipeventresources.com"), null, "plain address has no token");
 assert.strictEqual(tokenFromAddress(""), null, "empty address safe");
 
+// --- matching cascade ---
+const { matchMessage } = await import("../lib/replies.js");
+
+const ctx = {
+  clientExists: (id) => ["k3f9a2xq", "other111"].includes(id),
+  outboundIndex: new Map([["<sent-1@relay.brevo.com>", "other111"]]),
+  clientsByEmail: new Map([
+    ["solo@acme.com", ["k3f9a2xq"]],
+    ["shared@group.com", ["k3f9a2xq", "other111"]],
+  ]),
+};
+const base = { toAddresses: [], fromEmail: "", inReplyTo: "", references: [] };
+
+// 1. token wins, and beats a conflicting header match
+{
+  const m = matchMessage({ ...base,
+    toAddresses: [`droffey+crm-${tok}@vipeventresources.com`],
+    references: ["<sent-1@relay.brevo.com>"], fromEmail: "someone@else.com" }, ctx);
+  assert.deepStrictEqual([m.clientId, m.method, m.confidence], ["k3f9a2xq", "token", "high"],
+    "valid token wins over conflicting header/sender signals");
+}
+
+// a forged token must NOT match, and must fall through to the next signal
+{
+  const m = matchMessage({ ...base,
+    toAddresses: ["droffey+crm-k3f9a2xqdeadbeef@vipeventresources.com"],
+    references: ["<sent-1@relay.brevo.com>"] }, ctx);
+  assert.strictEqual(m.clientId, "other111", "forged token ignored, header used instead");
+  assert.strictEqual(m.method, "headers", "method reflects the signal actually used");
+}
+
+// 2. header match scans ALL References, not just In-Reply-To
+{
+  const m = matchMessage({ ...base,
+    references: ["<unknown@x.com>", "<sent-1@relay.brevo.com>"] }, ctx);
+  assert.strictEqual(m.clientId, "other111", "matches any id in References");
+}
+
+// 3. sender fallback — one hit is confident, several is not
+{
+  const one = matchMessage({ ...base, fromEmail: "SOLO@acme.com" }, ctx);
+  assert.deepStrictEqual([one.clientId, one.method, one.confidence], ["k3f9a2xq", "sender", "high"],
+    "single sender match is high confidence and case-insensitive");
+
+  const many = matchMessage({ ...base, fromEmail: "shared@group.com" }, ctx);
+  assert.strictEqual(many.confidence, "low", "ambiguous sender is low confidence");
+  assert.strictEqual(many.method, "sender", "still reports how it matched");
+}
+
+// 4. nothing matches → unmatched, never a guess
+{
+  const m = matchMessage({ ...base, fromEmail: "stranger@nowhere.com" }, ctx);
+  assert.deepStrictEqual([m.clientId, m.method], [null, null], "no signal means unmatched");
+}
+
+// a token for a client that no longer exists must not resurrect it
+{
+  const gone = mintReplyToken("deleted1");
+  const m = matchMessage({ ...base, toAddresses: [`droffey+crm-${gone}@vipeventresources.com`] }, ctx);
+  assert.strictEqual(m.clientId, null, "token for a missing client does not match");
+}
+
 console.log("check-replies: OK");

@@ -79,6 +79,16 @@ const base = { toAddresses: [], fromEmail: "", inReplyTo: "", references: [] };
   assert.strictEqual(many.method, "sender", "still reports how it matched");
 }
 
+// a valid token also wins over a conflicting sender match
+{
+  const otherTok = mintReplyToken("other111");
+  const m = matchMessage({ ...base,
+    toAddresses: [`droffey+crm-${otherTok}@vipeventresources.com`],
+    fromEmail: "solo@acme.com" }, ctx);
+  assert.deepStrictEqual([m.clientId, m.method], ["other111", "token"],
+    "valid token beats a conflicting sender match");
+}
+
 // 4. nothing matches → unmatched, never a guess
 {
   const m = matchMessage({ ...base, fromEmail: "stranger@nowhere.com" }, ctx);

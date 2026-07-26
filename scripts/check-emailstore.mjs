@@ -27,13 +27,16 @@ try {
     ...over,
   });
 
-  await saveMessages(db, [row(A)]);
+  const first = await saveMessages(db, [row(A)]);
+  assert.deepStrictEqual(first.savedIds, [A], "savedIds contains the id on first insert");
   let got = await listReplies(db, { scope: "all", clientId: "test-client" });
   assert.strictEqual(got.length, 1, "saved row is listed");
   assert.strictEqual(got[0].subject, "Re: invoice", "fields round trip");
 
   // idempotent: same Gmail id twice must not duplicate
-  await saveMessages(db, [row(A)]);
+  const dupe = await saveMessages(db, [row(A)]);
+  assert.strictEqual(dupe.saved, 0, "duplicate insert reports 0 saved");
+  assert.deepStrictEqual(dupe.savedIds, [], "savedIds is empty on a duplicate insert");
   got = await listReplies(db, { scope: "all", clientId: "test-client" });
   assert.strictEqual(got.length, 1, "re-saving the same message id is a no-op");
 

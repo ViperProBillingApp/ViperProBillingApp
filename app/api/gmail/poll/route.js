@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { readState, updateState } from "../../../../lib/clients.js";
-import { saveMessages, outboundMessageIdIndex } from "../../../../lib/emailstore.js";
+import { saveMessages, outboundMessageIdIndex, existingMessageIds } from "../../../../lib/emailstore.js";
 import { matchMessage } from "../../../../lib/replies.js";
 import { gmailConfigured, listRecentMessages, getMessage } from "../../../../lib/gmail.js";
 
@@ -41,15 +41,27 @@ export async function POST() {
     msgIds = await listRecentMessages();
   } catch (e) {
     // Auth failures must be loud — a silent failure looks exactly like "no replies".
-    console.error("gmail list failed:", e.message);
-    return NextResponse.json({ error: `Gmail unavailable: ${e.message}` }, { status: 502 });
+    // The raw error text is server-side only: it comes from Gmail/Google auth
+    // internals and shouldn't be echoed to the caller (and a non-Error throw
+    // must not render as the literal string "undefined").
+    console.error("gmail list failed:", e?.message || e);
+    return NextResponse.json({ error: "Gmail is unavailable — check the integration." }, { status: 502 });
   }
+
+  // Dedupe at read time, not just write time: saveMessages' ON CONFLICT already
+  // makes re-fetching harmless, but every re-fetch still costs a messages.get
+  // call against Gmail's quota. Skipping known ids here is a large chunk of the
+  // work on every poll after the first one in a given 7-day window.
+  const known = await existingMessageIds(db, msgIds);
+  const toFetch = msgIds.filter((id) => !known.has(id));
+  const skipped = msgIds.length - toFetch.length;
 
   const rows = [];
   const repliedClients = new Set();
-  for (const id of msgIds) {
+  let fetchErrors = 0;
+  for (const id of toFetch) {
     let m;
-    try { m = await getMessage(id); } catch (e) { console.error("gmail get failed:", id, e.message); continue; }
+    try { m = await getMessage(id); } catch (e) { console.error("gmail get failed:", id, e.message); fetchErrors++; continue; }
     // Never ingest our own outbound as if it were an inbound reply.
     if (m.fromEmail === String(process.env.GMAIL_IMPERSONATE || "").toLowerCase()) continue;
     const match = matchMessage(m, ctx);
@@ -63,24 +75,54 @@ export async function POST() {
     if (match.clientId && match.confidence === "high") repliedClients.add(match.clientId);
   }
 
-  const { saved } = await saveMessages(db, rows);
+  // Every message the list call found had a fetch that failed — that is a
+  // systemic outage (expired auth, Gmail 5xx), not "no replies today", and must
+  // not be reported as ok:true fetched:0.
+  if (toFetch.length > 0 && fetchErrors === toFetch.length) {
+    console.error(`gmail poll: all ${fetchErrors} message fetches failed`);
+    return NextResponse.json({ error: "Gmail is unavailable — check the integration." }, { status: 502 });
+  }
 
-  // Only cards genuinely awaiting a reply move — never override a human's stage.
-  if (saved > 0 && repliedClients.size) {
-    await updateState(db, (s) => {
+  const { saved, savedIds } = await saveMessages(db, rows);
+  const savedIdSet = new Set(savedIds);
+
+  // Only clients with a genuinely NEW high-confidence inbound row may be
+  // moved — repliedClients built from `rows` alone could include messages
+  // already stored on a previous poll, which would re-flip a card a human
+  // had since moved back to contacted-awaiting for an unrelated reason.
+  const newReplyClients = new Set(
+    rows.filter((r) => savedIdSet.has(r.id) && r.clientId && repliedClients.has(r.clientId)).map((r) => r.clientId)
+  );
+
+  let stageMoved = false;
+  let stageMoveError = null;
+  if (newReplyClients.size) {
+    const result = await updateState(db, (s) => {
       let changed = false;
+      const now = new Date().toISOString();
       const next = (s.clients || []).map((c) => {
-        if (!repliedClients.has(c.id) || c.stage !== "contacted-awaiting") return c;
+        if (!newReplyClients.has(c.id) || c.stage !== "contacted-awaiting") return c;
         changed = true;
-        return { ...c, stage: "replied", stageAt: new Date().toISOString() };
+        const activity = [
+          { at: now, type: "email", text: "Client replied — moved to Replied · needs action" },
+          ...(c.activity || []),
+        ].slice(0, 200);
+        return { ...c, stage: "replied", stageAt: now, activity };
       });
       return changed ? { clients: next } : null;
     });
+    if (!result.ok) {
+      stageMoveError = result.error;
+      console.error("gmail poll: stage move failed:", result.error);
+    } else {
+      stageMoved = !result.skipped;
+    }
   }
 
   return NextResponse.json({
-    ok: true, fetched: rows.length, saved,
+    ok: true, fetched: rows.length, saved, skipped, fetchErrors,
     matched: rows.filter((r) => r.clientId).length,
     unmatched: rows.filter((r) => !r.clientId).length,
+    stageMoved, ...(stageMoveError ? { stageMoveError } : {}),
   });
 }

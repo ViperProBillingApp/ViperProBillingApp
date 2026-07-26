@@ -992,10 +992,10 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
   const [copied, setCopied] = useState(false);
   const [send, setSend] = useState({ busy: false, err: "" });
   const copy = () => { navigator.clipboard?.writeText(`From: ${fromStr}\nTo: ${toStr}${ccStr.trim() ? `\nCc: ${ccStr}` : ""}\nSubject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1600); }); };
-  const markSent = (via) => {
+  const markSent = (via, messageId) => {
     const now = new Date().toISOString();
     // Sent = contacted: leave the email queue and start the 10-day reply clock.
-    onLogSent(client.id, key, { sentAt: now, via, subject, body, label: tpl.label, dismissedAt: now }, tpl.label);
+    onLogSent(client.id, key, { sentAt: now, via, subject, body, label: tpl.label, dismissedAt: now, messageId: messageId || "" }, tpl.label);
     if (client.stage !== "marked-deletion") {
       onUpdateWithLog?.(client.id, { stage: "contacted-awaiting", stageAt: now }, "stage", "Email sent — Contacted · awaiting reply");
     }
@@ -1013,12 +1013,13 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
           recipients: toList.map((e) => ({ email: e })),
           ...(ccList.length ? { cc: ccList.map((e) => ({ email: e })) } : {}),
           ...(fromStr.trim().toLowerCase() !== FROM_EMAIL.toLowerCase() ? { from: fromStr.trim() } : {}),
+          clientId: client.id,
           subject, body,
         }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { setSend({ busy: false, err: d.error || "Send failed." }); return; }
-      markSent("brevo");
+      markSent("brevo", d.messageId);
       setSend({ busy: false, err: "" });
       onSent?.(`Sent to ${client.company || client.name}${toList.length + ccList.length > 1 ? ` (${toList.length + ccList.length} recipients)` : ""}`);
       onDone?.();

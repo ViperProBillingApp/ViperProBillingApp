@@ -797,7 +797,7 @@ export default function CRM({ user }) {
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} replyCount={replies.length + unmatched.length} onGo={setTab} onOpen={setDetailId} />}
-            {tab === "replies" && <RepliesTab replies={replies} unmatched={unmatched} clients={clients} onOpen={setDetailId} onRefresh={loadReplies} />}
+            {tab === "replies" && <RepliesTab replies={replies} unmatched={unmatched} clients={clients} templates={templates} settings={settings} signatureImage={signatureImage} onOpen={setDetailId} onRefresh={loadReplies} />}
           </>
         )}
 
@@ -1981,9 +1981,10 @@ function ClientPicker({ clients, value, onChange }) {
 // Shared pile: every reply arrives unhandled, anyone can answer it, and marking
 // it handled stamps who did. No hard locking by design — for five staff a
 // visible "handled by" is enough.
-function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
+function RepliesTab({ replies, unmatched, clients, templates, settings, signatureImage, onOpen, onRefresh }) {
   const [openId, setOpenId] = useState(null);
   const [busyId, setBusyId] = useState("");
+  const [respondTo, setRespondTo] = useState(null); // the inbound message being replied to
   const byId = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
   const [err, setErr] = useState("");
   const patch = async (body) => {
@@ -2065,12 +2066,86 @@ function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
             </div>
             <div className="flex items-center" style={{ gap: 8, marginTop: 10 }}>
               <GhostBtn onClick={() => setOpenId(open ? null : m.id)}>{open ? "Collapse" : "Read full"}</GhostBtn>
-              <MiniBtn solid onClick={() => patch({ id: m.id, action: "handled" })}>Mark handled</MiniBtn>
+              <MiniBtn solid onClick={() => setRespondTo(m)}>
+                <span className="flex items-center" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
+                  Respond
+                </span>
+              </MiniBtn>
+              <MiniBtn onClick={() => patch({ id: m.id, action: "handled" })}>Mark handled</MiniBtn>
             </div>
           </div>
         );
       })}
+      {respondTo && (
+        <RespondModal message={respondTo} client={byId[respondTo.clientId]} templates={templates} settings={settings} signatureImage={signatureImage}
+          onClose={() => setRespondTo(null)} onSent={() => { setRespondTo(null); onRefresh(); }} />
+      )}
     </div>
+  );
+}
+
+// Reply to a client's email, threaded, from the signed-in mailbox via Gmail.
+// Blank or the saved custom template to start; signature appended by the server.
+function RespondModal({ message, client, templates, settings, signatureImage, onClose, onSent }) {
+  const [tpl, setTpl] = useState("");
+  const [body, setBody] = useState("");
+  const [state, setState] = useState({ busy: false, err: "", done: false });
+  const pickTemplate = (key) => {
+    setTpl(key);
+    if (key === "custom" && templates?.custom?.body) setBody(templates.custom.body(client || {}, settings || {}));
+    else setBody("");
+  };
+  const send = async () => {
+    if (!body.trim()) { setState({ busy: false, err: "Write a reply first.", done: false }); return; }
+    setState({ busy: true, err: "", done: false });
+    try {
+      const r = await fetch("/api/replies/send", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ replyToId: message.id, body }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { setState({ busy: false, err: d.error || "Send failed.", done: false }); return; }
+      setState({ busy: false, err: "", done: true });
+      onSent();
+    } catch { setState({ busy: false, err: "Couldn't reach the server — try again.", done: false }); }
+  };
+  const subject = /^re:/i.test(message.subject || "") ? message.subject : `Re: ${message.subject || "(no subject)"}`;
+  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: 8, padding: "8px 11px" };
+  return (
+    <Modal title={`Respond to ${client ? (client.company || client.name) : message.fromEmail}`} onClose={onClose} blueHeader tall>
+      <Field dark label="To"><div style={ro}>{message.fromEmail}</div></Field>
+      <Field dark label="Subject"><div style={ro}>{subject}</div></Field>
+      <Field dark label="Template">
+        <MiniSelect value={tpl} onChange={pickTemplate} options={[["", "Blank"], ["custom", "Custom template"]]} />
+      </Field>
+      <Field dark label="Message">
+        <textarea rows={9} autoFocus value={body} onChange={(e) => setBody(e.target.value)}
+          placeholder="Type your reply…" style={{ ...inputStyle, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} />
+      </Field>
+      {signatureImage
+        ? <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.85)", flexShrink: 0 }}>Signature ·</span>
+            <img src={signatureImage} alt="your signature" style={{ maxHeight: 26, maxWidth: 220, background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,0.65)" }}>added automatically</span>
+          </div>
+        : <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.65)", marginBottom: 10 }}>No signature image on your user card — the reply sends without one.</p>}
+      <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.65)", marginBottom: 12 }}>Sends from your mailbox and threads into the client&rsquo;s conversation.</p>
+      <div className="flex items-center" style={{ gap: 10 }}>
+        {state.done ? (
+          <span style={{ fontSize: 13, color: "#8FE3B8", fontWeight: 600 }}>✓ Sent</span>
+        ) : (
+          <>
+            <button onClick={send} disabled={state.busy || !body.trim()}
+              style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: state.busy || !body.trim() ? C.grey : C.action, color: "#fff", cursor: state.busy || !body.trim() ? "default" : "pointer" }}>
+              {state.busy ? "Sending…" : "Send reply"}
+            </button>
+            <GhostBtn onClick={onClose}>Cancel</GhostBtn>
+            {state.err && <span style={{ fontSize: 12, color: "#FFB4AD" }}>{state.err}</span>}
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

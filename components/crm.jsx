@@ -375,6 +375,46 @@ export default function CRM({ user }) {
   const [composeType, setComposeType] = useState("reminder");
   const [toast, setToast] = useState("");
 
+  // Gmail reply inbox: unhandled + unmatched reply queues, and a poll loop that
+  // keeps them fresh while the app is open.
+  const [replies, setReplies] = useState([]);
+  const [unmatched, setUnmatched] = useState([]);
+  // A broken Gmail integration looks exactly like "no replies today", which is the
+  // worst possible failure. Surface it instead of swallowing it.
+  const [mailErr, setMailErr] = useState("");
+  const loadReplies = useCallback(async () => {
+    try {
+      const [a, b] = await Promise.all([
+        fetch("/api/replies?scope=unhandled"),
+        fetch("/api/replies?scope=unmatched"),
+      ]);
+      if (a.ok) setReplies((await a.json()).replies || []);
+      if (b.ok) setUnmatched((await b.json()).replies || []);
+    } catch { /* transient — next poll retries */ }
+  }, []);
+  // Poll Gmail on load, then every 2 minutes while this tab is open. The call is
+  // cheap against Gmail's daily quota, so this is well within budget.
+  useEffect(() => {
+    if (!loaded) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/gmail/poll", { method: "POST" });
+        if (stop) return;
+        if (r.ok) setMailErr("");
+        else if (r.status === 501) setMailErr(""); // not configured yet — not an error
+        else {
+          const d = await r.json().catch(() => ({}));
+          setMailErr(d.error || "Gmail sync failed — replies may be missing.");
+        }
+      } catch { if (!stop) setMailErr("Gmail sync unreachable — replies may be missing."); }
+      if (!stop) await loadReplies();
+    };
+    tick();
+    const iv = setInterval(tick, 120000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [loaded, loadReplies]);
+
   const templates = useMemo(() => getTemplates(settings), [settings]);
 
   // Server-state revision this tab last loaded or saved. Saves send it; the
@@ -727,7 +767,8 @@ export default function CRM({ user }) {
               display so the right-alignment holds even if the .flex utility
               class isn't emitted by the CSS build. */}
           <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
-            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"]].map(([k, t]) => (
+            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"],
+              ["replies", `Replies${replies.length + unmatched.length ? ` · ${replies.length + unmatched.length}` : ""}`]].map(([k, t]) => (
               <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
@@ -740,6 +781,12 @@ export default function CRM({ user }) {
           </nav>
         </div>
 
+        {mailErr && (
+          <div style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.red, fontWeight: 600 }}>
+            {mailErr}
+          </div>
+        )}
+
         {clients.length === 0 ? (
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
@@ -749,7 +796,8 @@ export default function CRM({ user }) {
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
-            {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} onGo={setTab} onOpen={setDetailId} />}
+            {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} replyCount={replies.length + unmatched.length} onGo={setTab} onOpen={setDetailId} />}
+            {tab === "replies" && <RepliesTab replies={replies} unmatched={unmatched} clients={clients} onOpen={setDetailId} onRefresh={loadReplies} />}
           </>
         )}
 
@@ -1930,6 +1978,94 @@ function ClientPicker({ clients, value, onChange }) {
 }
 
 /* --------------------------- Recovery tab --------------------------- */
+/* ---------------------------- Replies tab ---------------------------- */
+// Shared pile: every reply arrives unhandled, anyone can answer it, and marking
+// it handled stamps who did. No hard locking by design — for five staff a
+// visible "handled by" is enough.
+function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
+  const [openId, setOpenId] = useState(null);
+  const [busyId, setBusyId] = useState("");
+  const byId = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
+  const patch = async (body) => {
+    setBusyId(body.id);
+    try {
+      const r = await fetch("/api/replies", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (r.ok) await onRefresh();
+    } finally { setBusyId(""); }
+  };
+
+  if (!replies.length && !unmatched.length) {
+    return (
+      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+        No replies waiting. New client replies appear here within a couple of minutes.
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Needs matching — mail we could not confidently attribute. Without this
+          panel an unmatched reply would be invisible, which is the exact failure
+          this feature exists to prevent. */}
+      {unmatched.length > 0 && (
+        <div style={{ background: C.amberBg, borderRadius: 12, border: `1px solid ${C.amber}55`, padding: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: C.amber, marginBottom: 8 }}>
+            Needs matching · {unmatched.length}
+          </div>
+          <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10 }}>
+            We couldn&rsquo;t tell which client these came from. Pick one to file it against.
+          </div>
+          {unmatched.map((m) => (
+            <div key={m.id} style={{ background: C.panel, borderRadius: 8, padding: "9px 11px", marginBottom: 6, opacity: busyId === m.id ? 0.5 : 1 }}>
+              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, fontFamily: MONO, fontWeight: 600 }}>{m.fromEmail}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 10.5, color: C.faint }}>{fmtDate(m.sentAt)}</span>
+              </div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 3 }}>{m.subject || "(no subject)"}</div>
+              <div style={{ fontSize: 12, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>{m.snippet}</div>
+              <div style={{ marginTop: 8 }}>
+                <ClientPicker clients={clients} value="" onChange={(cid) => cid && patch({ id: m.id, action: "assign", clientId: cid })} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {replies.map((m) => {
+        const c = byId[m.clientId];
+        const open = openId === m.id;
+        return (
+          <div key={m.id} style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, opacity: busyId === m.id ? 0.5 : 1 }}>
+            <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap" }}>
+              <button onClick={() => c && onOpen(c.id)} disabled={!c} title={c ? "Open client" : ""}
+                style={{ background: "none", border: "none", padding: 0, cursor: c ? "pointer" : "default", fontSize: 14, fontWeight: 700, color: C.ink }}>
+                {c ? (c.company || c.name) : "Unknown client"}
+              </button>
+              <span style={{ fontSize: 11.5, color: C.sub, fontFamily: MONO }}>{m.fromEmail}</span>
+              {/* Low confidence means the match came from an ambiguous signal —
+                  worth a glance before acting on it. */}
+              {m.matchConf === "low" && <MiniPill fg={C.amber} bg={C.amberBg}>low confidence</MiniPill>}
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11.5, color: C.faint }}>{fmtDate(m.sentAt)}</span>
+            </div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{m.subject || "(no subject)"}</div>
+            <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, whiteSpace: open ? "pre-wrap" : "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.5 }}>
+              {open ? (m.bodyText || m.snippet) : m.snippet}
+            </div>
+            <div className="flex items-center" style={{ gap: 8, marginTop: 10 }}>
+              <GhostBtn onClick={() => setOpenId(open ? null : m.id)}>{open ? "Collapse" : "Read full"}</GhostBtn>
+              <MiniBtn solid onClick={() => patch({ id: m.id, action: "handled" })}>Mark handled</MiniBtn>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RecoveryTab({ bounced, onApply, onUpdate, onOpen }) {
   if (bounced.length === 0) return <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>No bounced or undelivered contacts. When an email bounces in Brevo, set the client's email status to “Bounced” and recover a replacement here.</div>;
   return (
@@ -2465,7 +2601,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
 }
 
 /* ----------------------------- Today tab ----------------------------- */
-function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
+function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen }) {
   const now = new Date();
   const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
   const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
@@ -2495,6 +2631,7 @@ function DigestTab({ clients, settings, bounced, onGo, onOpen }) {
           <Row n={needContact.length} label="Need to contact" tint={C.amber} to="workflow" />
           <Row n={awaitingReply.length} label="Awaiting reply" tint={C.amber} to="workflow" />
           <Row n={oldPricing.length} label="Old pricing — notices to send" tint={C.amber} to="comms" />
+          <Row n={replyCount} label="Client replies waiting" tint={C.action} to="replies" />
           <Row n={pendingContacts.length} label="Recovered contacts awaiting approval" tint={C.action} to="recovery" />
           <Row n={bounced} label="Bounced contacts to recover" tint={C.red} to="recovery" />
         </div>

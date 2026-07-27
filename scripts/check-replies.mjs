@@ -102,4 +102,56 @@ const base = { toAddresses: [], fromEmail: "", inReplyTo: "", references: [] };
   assert.strictEqual(m.clientId, null, "token for a missing client does not match");
 }
 
+// --- gmail.js pure-function checks ---
+const { htmlToText, extractToAddresses, extractReferences, isAutoReply } =
+  await import("../lib/gmail.js");
+
+// htmlToText: strips <script>/<style> CONTENT, converts <br>/</p> to newlines,
+// decodes entities, and is bounded so hostile input can't burn the request.
+{
+  const html = "<style>.x{color:red}</style><script>alert(1)</script><p>Hi &amp; welcome&#8217;s here<br>Bye</p>";
+  const text = htmlToText(html);
+  assert.ok(!text.includes("alert(1)"), "script content stripped");
+  assert.ok(!text.includes("color:red"), "style content stripped");
+  assert.ok(text.includes("\n"), "br/</p> become newlines");
+  assert.ok(text.includes("Hi & welcome’s here"), "named and numeric entities decoded");
+
+  // Without the length cap this same input measures ~10s on this machine (the
+  // regex scan is quadratic-ish on unclosed "<script" runs); capped it's ~1s.
+  // The bound here is 3000ms rather than a tight 1000ms because wall-clock
+  // timing is noisy under shared/loaded CI — this still fails hard if the cap
+  // regresses (e.g. someone removes HTML_TO_TEXT_MAX_LEN), which is the point.
+  const start = Date.now();
+  const hostile = "<script".repeat(50_000);
+  htmlToText(hostile);
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 3000, `hostile input must resolve fast, took ${elapsed}ms`);
+}
+
+// Cc must be searched for a reply token, same as To/Delivered-To/X-Original-To.
+{
+  const payload = { headers: [{ name: "Cc", value: "droffey+crm-abc123@vipeventresources.com" }] };
+  const addrs = extractToAddresses(payload);
+  assert.ok(addrs.includes("droffey+crm-abc123@vipeventresources.com"), "Cc address is included");
+}
+
+// References splits on commas as well as whitespace.
+{
+  const payload = { headers: [{ name: "References", value: "<a@x.com>, <b@x.com> <c@x.com>" }] };
+  assert.deepStrictEqual(extractReferences(payload), ["<a@x.com>", "<b@x.com>", "<c@x.com>"],
+    "References splits on commas and whitespace");
+}
+
+// autoReply detection: true for known auto-reply signals, false for a normal message.
+{
+  const autoSubmitted = { headers: [{ name: "Auto-Submitted", value: "auto-replied" }] };
+  assert.strictEqual(isAutoReply(autoSubmitted), true, "Auto-Submitted: auto-replied is an auto-reply");
+
+  const bulk = { headers: [{ name: "Precedence", value: "bulk" }] };
+  assert.strictEqual(isAutoReply(bulk), true, "Precedence: bulk is an auto-reply");
+
+  const normal = { headers: [{ name: "Subject", value: "Re: invoice" }] };
+  assert.strictEqual(isAutoReply(normal), false, "a normal message is not an auto-reply");
+}
+
 console.log("check-replies: OK");

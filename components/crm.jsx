@@ -511,7 +511,7 @@ export default function CRM({ user }) {
       let changed = false;
       const next = p.map((c) => {
         if (c.archivedClient || c.formerCustomer) return c;
-        if (followUpDue(c, now) && !["need-to-contact", "contacted-awaiting", "marked-deletion"].includes(c.stage)) {
+        if (followUpDue(c, now) && !["need-to-contact", "contacted-awaiting", "marked-deletion", "replied"].includes(c.stage)) {
           changed = true;
           return { ...c, stage: "need-to-contact", stageAt: now.toISOString(), followUp: "", workflowHidden: false, activity: logActivity(c, "stage", `Follow-up date ${fmtDate(c.followUp)} reached, moved to Need to contact`) };
         }

@@ -1977,7 +1977,6 @@ function ClientPicker({ clients, value, onChange }) {
   );
 }
 
-/* --------------------------- Recovery tab --------------------------- */
 /* ---------------------------- Replies tab ---------------------------- */
 // Shared pile: every reply arrives unhandled, anyone can answer it, and marking
 // it handled stamps who did. No hard locking by design — for five staff a
@@ -1986,15 +1985,21 @@ function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
   const [openId, setOpenId] = useState(null);
   const [busyId, setBusyId] = useState("");
   const byId = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
+  const [err, setErr] = useState("");
   const patch = async (body) => {
-    setBusyId(body.id);
+    if (busyId) return; // a second click while one is in flight is always a mistake
+    setBusyId(body.id); setErr("");
     try {
       const r = await fetch("/api/replies", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (r.ok) await onRefresh();
-    } finally { setBusyId(""); }
+      if (r.ok) { await onRefresh(); return; }
+      // Silent failure here would leave the row looking untouched with no reason why.
+      const d = await r.json().catch(() => ({}));
+      setErr(d.error || "That didn't save — try again.");
+    } catch { setErr("Couldn't reach the server — try again."); }
+    finally { setBusyId(""); }
   };
 
   if (!replies.length && !unmatched.length) {
@@ -2006,6 +2011,9 @@ function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {err && (
+        <div style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: C.red, fontWeight: 600 }}>{err}</div>
+      )}
       {/* Needs matching — mail we could not confidently attribute. Without this
           panel an unmatched reply would be invisible, which is the exact failure
           this feature exists to prevent. */}
@@ -2066,6 +2074,7 @@ function RepliesTab({ replies, unmatched, clients, onOpen, onRefresh }) {
   );
 }
 
+/* --------------------------- Recovery tab --------------------------- */
 function RecoveryTab({ bounced, onApply, onUpdate, onOpen }) {
   if (bounced.length === 0) return <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>No bounced or undelivered contacts. When an email bounces in Brevo, set the client's email status to “Bounced” and recover a replacement here.</div>;
   return (
@@ -3053,6 +3062,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
           )}
 
+          <Conversation client={client} />
           {client.chargeoverId && <PastCharges client={client} state={inv} />}
 
           {/* Record payment */}
@@ -3230,6 +3240,42 @@ function SentCommRow({ tKey, v }) {
     </div>
   );
 }
+// Conversation with this client — inbound and outbound interleaved, newest
+// first. Loaded on demand so the (already large) client list load is untouched.
+function Conversation({ client }) {
+  const [msgs, setMsgs] = useState(null); // null = still loading
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/replies?scope=all&clientId=${encodeURIComponent(client.id)}`)
+      .then((r) => (r.ok ? r.json() : { replies: [] }))
+      .then((d) => { if (live) setMsgs(d.replies || []); })
+      .catch(() => { if (live) setMsgs([]); });
+    return () => { live = false; }; // drawer can close mid-flight
+  }, [client.id]);
+
+  if (msgs === null) return <Section title="Conversation"><div style={{ fontSize: 12.5, color: C.faint }}>Loading…</div></Section>;
+  if (!msgs.length) return <Section title="Conversation"><div style={{ fontSize: 12.5, color: C.faint }}>No email exchanged with this client yet.</div></Section>;
+  return (
+    <Section title={`Conversation · ${msgs.length}`}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {msgs.map((m) => (
+          <div key={m.id} style={{ background: m.direction === "in" ? C.paper : "#E7EDF8", borderRadius: 8, padding: "9px 11px" }}>
+            <div className="flex items-center" style={{ gap: 8 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: m.direction === "in" ? C.ink : C.action }}>
+                {m.direction === "in" ? m.fromEmail : "We sent"}
+              </span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 10.5, color: C.faint }}>{fmtDate(m.sentAt)}</span>
+            </div>
+            <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 3 }}>{m.subject || "(no subject)"}</div>
+            <div style={{ fontSize: 12, color: C.sub, marginTop: 3, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{m.bodyText || m.snippet}</div>
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function Section({ title, action, children }) {
   return (
     <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, marginBottom: 14 }}>

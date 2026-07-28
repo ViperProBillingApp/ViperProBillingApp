@@ -2942,9 +2942,9 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
           </div>
         </div>
-        {/* Card tabs: Info / Billing / Portal — same raised-tab design as the main page */}
+        {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page */}
         <div className="flex items-end" style={{ gap: 3, padding: "6px 20px 0" }}>
-          {[["info", "Info"], ["billing", "Billing"], ["portal", "Portal"]].map(([k, t]) => (
+          {[["info", "Info"], ["emails", "Emails"], ["billing", "Billing"], ["portal", "Portal"]].map(([k, t]) => (
             <Tab key={k} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
         </div>
@@ -3035,15 +3035,6 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             </div>
           </Section>
 
-          {/* Sent comms — a copy of every message sent, newest first */}
-          {sentComms.length > 0 && (
-            <Section title="Communications sent">
-              {[...sentComms].sort((a, b) => new Date(b[1].sentAt) - new Date(a[1].sentAt)).map(([k, v]) => (
-                <SentCommRow key={k} tKey={k} v={v} />
-              ))}
-            </Section>
-          )}
-
           {/* Activity + note logging */}
           <Section title="Activity">
             <div className="flex" style={{ gap: 6, marginBottom: 10 }}>
@@ -3058,6 +3049,22 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Section title="Archived contacts">
               {client.archivedContacts.map((a, i) => <div key={i} style={{ fontSize: 12, color: C.faint, fontFamily: MONO, padding: "3px 0" }}>{a.email} · {a.reason}</div>)}
             </Section>
+          )}
+          </>)}
+
+          {dtab === "emails" && (<>
+          {/* Two-way conversation (inbound replies + our Gmail replies), then the
+              archive of chase emails sent via Brevo. */}
+          <Conversation client={client} />
+          {sentComms.length > 0 && (
+            <Section title="Communications sent">
+              {[...sentComms].sort((a, b) => new Date(b[1].sentAt) - new Date(a[1].sentAt)).map(([k, v]) => (
+                <SentCommRow key={k} tKey={k} v={v} />
+              ))}
+            </Section>
+          )}
+          {sentComms.length === 0 && (
+            <div style={{ fontSize: 12.5, color: C.faint, padding: "4px 2px" }}>No chase emails sent to this client yet.</div>
           )}
           </>)}
 
@@ -3137,7 +3144,6 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <MaritzPricing client={client} settings={settings} onUpdate={set} onUpdateSettings={onUpdateSettings} officeSiblings={officeSiblings} />
           )}
 
-          <Conversation client={client} />
           {client.chargeoverId && <PastCharges client={client} state={inv} />}
 
           {/* Record payment */}

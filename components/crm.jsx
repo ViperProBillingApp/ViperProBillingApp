@@ -277,7 +277,9 @@ function normalise(r) {
     // silently defaulting to false, so an old cached client state can't wipe it.
     inChargeOver: r.inChargeOver === undefined ? !!(r.chargeoverId && String(r.chargeoverId).trim()) : !!r.inChargeOver,
     workflowHidden: !!r.workflowHidden,
-    maritzPortal: !!r.maritzPortal,
+    // Self-healing: being IN the Maritz segment means having the portal — a
+    // manual add that only set the segment used to show "Not Maritz" in the list.
+    maritzPortal: !!r.maritzPortal || r.segment === "maritz-portal",
     viperCustomer: !!r.viperCustomer,
     portalUrl: (r.portalUrl || "").trim(),
     adminUrl: (r.adminUrl || "").trim(),

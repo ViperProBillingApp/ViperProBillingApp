@@ -725,7 +725,7 @@ export default function CRM({ user }) {
     <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
       {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
-      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", borderRight: `1px solid ${C.line}`, padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", border: `1px solid ${C.line}`, borderLeft: "none", borderRadius: "0 12px 12px 0", overflow: "hidden", padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
         <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -770,15 +770,15 @@ export default function CRM({ user }) {
               display so the right-alignment holds even if the .flex utility
               class isn't emitted by the CSS build. */}
           <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
-            {[["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"],
-              ["replies", `Replies${replies.length + unmatched.length ? ` · ${replies.length + unmatched.length}` : ""}`]].map(([k, t]) => (
-              <Tab key={k} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
+            {[["digest", "Today", "today"], ["clients", "Clients", "users"], ["workflow", "Workflow", "workflow"], ["comms", "Emails", "mail"],
+              ["replies", `Replies${replies.length + unmatched.length ? ` · ${replies.length + unmatched.length}` : ""}`, "replies"]].map(([k, t, ic]) => (
+              <Tab key={k} icon={ic} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
-              <MiniBtn solid small onClick={() => setModal("import")}>Import CSV</MiniBtn>
-              <MiniBtn small onClick={() => setModal("archived")}>Archived{archived.length ? ` · ${archived.length}` : ""}</MiniBtn>
-              <MiniBtn small onClick={() => setModal("deleted")}>Deleted</MiniBtn>
-              <MiniBtn small onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+              <MiniBtn small icon="import" onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn small icon="archive" onClick={() => setModal("archived")}>Archived{archived.length ? ` · ${archived.length}` : ""}</MiniBtn>
+              <MiniBtn small icon="trash" onClick={() => setModal("deleted")}>Deleted</MiniBtn>
+              <MiniBtn small icon="export" onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
               </span>
@@ -844,9 +844,9 @@ export default function CRM({ user }) {
   );
 }
 
-// Brand-blue nav glyphs — one per left-menu heading.
-function MenuIcon({ name, color }) {
-  const p = { width: 21, height: 21, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
+// Brand-blue glyphs — left-menu headings, tab rows, metric blocks.
+function MenuIcon({ name, color, size = 21 }) {
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
   switch (name) {
     case "add": return <svg {...p}><path d="M12 5v14M5 12h14" /></svg>;
     case "recovery": return <svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>;
@@ -859,6 +859,23 @@ function MenuIcon({ name, color }) {
     case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill={color} stroke="none" /></svg>;
     case "portal": return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M7 6.5h.01" /><path d="M8 14h5" /></svg>;
     case "reports": return <svg {...p}><path d="M3 21h18" /><path d="M6 21V11M11 21V4M16 21v-7M21 21V8" /></svg>;
+    // tab-row glyphs
+    case "today": return <svg {...p}><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /><path d="M9 15l2 2 4-4" /></svg>;
+    case "workflow": return <svg {...p}><rect x="3" y="3" width="5" height="18" rx="1" /><rect x="10" y="3" width="5" height="12" rx="1" /><rect x="17" y="3" width="5" height="8" rx="1" /></svg>;
+    case "replies": return <svg {...p}><path d="M9 17l-5-5 5-5" /><path d="M4 12h9a7 7 0 0 1 7 7v1" /></svg>;
+    case "info": return <svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5M12 8h.01" /></svg>;
+    case "billing": return <svg {...p}><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20M6 15h4" /></svg>;
+    // metric-block glyphs
+    case "alert": return <svg {...p}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>;
+    case "dollar": return <svg {...p}><path d="M12 1v22" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>;
+    case "trend": return <svg {...p}><path d="M23 6l-9.5 9.5-5-5L1 18" /><path d="M17 6h6v6" /></svg>;
+    case "bell": return <svg {...p}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.73 21a2 2 0 0 1-3.46 0" /></svg>;
+    case "mailx": return <svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /><path d="M15.5 13.5l5 5M20.5 13.5l-5 5" /></svg>;
+    // toolbar glyphs
+    case "import": return <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5M12 15V3" /></svg>;
+    case "export": return <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5M12 3v12" /></svg>;
+    case "archive": return <svg {...p}><rect x="2" y="3" width="20" height="5" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></svg>;
+    case "trash": return <svg {...p}><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>;
     default: return null;
   }
 }
@@ -1168,23 +1185,40 @@ function StatStrip({ clients, settings, bounced }) {
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
-      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} bg="#F0F5FC" />
-      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} bg="#E4EDF9" />
-      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} bg="#D8E5F6" />
-      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} bg="#CCDDF3" />
-      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} bg="#C0D5F0" />
+      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} bg="240,245,252" icon="alert" />
+      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} bg="228,237,249" icon="dollar" />
+      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} bg="216,229,246" icon="trend" />
+      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} bg="204,221,243" icon="bell" />
+      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} bg="192,213,240" icon="mailx" />
     </section>
   );
 }
-function Stat({ label, value, sub, accent, small, bg }) {
+// Liquid-glass metric block over the original stepped light-blue tints: the
+// existing colour (as slightly-translucent rgb so the board gradient breathes
+// through), a specular white sweep across the top, an inner lip, a soft drop
+// below, and a large watermark glyph on the right.
+function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246" }) {
   return (
-    <div style={{ background: bg || C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "8px 10px" }}>
-      <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
-        <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0 }} />
-        <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
+    <div style={{
+      position: "relative", overflow: "hidden",
+      background: `linear-gradient(155deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.12) 48%, rgba(255,255,255,0) 100%), rgba(${bg},0.82)`,
+      backdropFilter: "blur(10px) saturate(1.4)", WebkitBackdropFilter: "blur(10px) saturate(1.4)",
+      borderRadius: 12, border: "1px solid rgba(255,255,255,0.55)", padding: "8px 10px",
+      boxShadow: "inset 0 1.5px 0 rgba(255,255,255,0.8), inset 0 -10px 14px -10px rgba(22,48,95,0.35), 0 4px 10px rgba(22,48,95,0.22)",
+    }}>
+      {icon && (
+        <div aria-hidden style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", opacity: 0.35, filter: "drop-shadow(0 1px 1px rgba(255,255,255,0.6))" }}>
+          <MenuIcon name={icon} size={34} color="#3B5BA5" />
+        </div>
+      )}
+      <div style={{ position: "relative", paddingRight: 40 }}>
+        <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
+          <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0 }} />
+          <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
+        </div>
+        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25 }}>{value}</div>
+        <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
       </div>
-      <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25 }}>{value}</div>
-      <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
     </div>
   );
 }
@@ -2952,8 +2986,8 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
         </div>
         {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page */}
         <div className="flex items-end" style={{ gap: 3, padding: "6px 20px 0" }}>
-          {[["info", "Info"], ["emails", "Emails"], ["billing", "Billing"], ["portal", "Portal"]].map(([k, t]) => (
-            <Tab key={k} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
+          {[["info", "Info", "info"], ["emails", "Emails", "mail"], ["billing", "Billing", "billing"], ["portal", "Portal", "portal"]].map(([k, t, ic]) => (
+            <Tab key={k} icon={ic} onLight active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
         </div>
         </div>
@@ -3826,23 +3860,39 @@ function MiniPill({ fg, bg, children }) { return <span style={{ fontSize: 10, fo
 // Raised "real tab" look, shared by the main page and the client card: the
 // active tab lifts up and fuses with the content background (C.paper);
 // inactive tabs sit lower and darker on a recessed base.
-function Tab({ active, onClick, children }) {
+// Liquid-glass tabs: frosted translucent panes with a specular top edge and
+// backdrop blur; the active pane lifts to solid paper. Default styling reads
+// against the dark board gradient; `onLight` tints the glass for white cards.
+function Tab({ active, onClick, icon, onLight, children }) {
   return (
     <button onClick={onClick} style={{
+      display: "inline-flex", alignItems: "center", gap: 7,
       fontSize: 13.5, fontWeight: 600, padding: active ? "10px 18px 11px" : "8px 16px", cursor: "pointer",
-      border: `1px solid ${C.line}`, borderBottom: "none",
-      borderRadius: "10px 10px 0 0",
-      background: active ? C.paper : "linear-gradient(to bottom, #CDD5E2 0%, #AEB8C9 100%)",
-      color: active ? C.ink : C.sub,
+      border: active ? `1px solid ${C.line}` : `1px solid ${onLight ? "rgba(59,91,165,0.28)" : "rgba(255,255,255,0.35)"}`, borderBottom: "none",
+      borderRadius: "12px 12px 0 0",
+      background: active
+        ? C.paper
+        : onLight
+          ? "linear-gradient(160deg, rgba(59,91,165,0.16) 0%, rgba(59,91,165,0.09) 45%, rgba(59,91,165,0.04) 100%)"
+          : "linear-gradient(160deg, rgba(255,255,255,0.34) 0%, rgba(255,255,255,0.16) 45%, rgba(255,255,255,0.06) 100%)",
+      backdropFilter: active ? undefined : "blur(9px) saturate(1.35)",
+      WebkitBackdropFilter: active ? undefined : "blur(9px) saturate(1.35)",
+      color: active ? C.ink : onLight ? C.sub : "rgba(255,255,255,0.92)",
+      textShadow: active || onLight ? undefined : "0 1px 2px rgba(22,48,95,0.35)",
       marginBottom: -1, position: "relative", top: active ? 0 : 2,
-      boxShadow: active ? "0 -3px 6px rgba(34,48,76,0.08)" : "inset 0 -7px 9px -4px rgba(22,48,95,0.45)",
+      boxShadow: active
+        ? "0 -3px 6px rgba(34,48,76,0.08)"
+        : onLight
+          ? "inset 0 1.5px 0 rgba(255,255,255,0.8), inset 0 -8px 12px -6px rgba(22,48,95,0.22), 0 2px 5px rgba(22,48,95,0.10)"
+          : "inset 0 1.5px 0 rgba(255,255,255,0.55), inset 0 -8px 12px -6px rgba(22,48,95,0.5), 0 2px 6px rgba(22,48,95,0.18)",
       transition: "all 0.12s ease-out", zIndex: active ? 2 : 1,
     }}>
+      {icon && <MenuIcon name={icon} size={15} color={active ? C.action : onLight ? C.sub : "rgba(255,255,255,0.9)"} />}
       {children}
     </button>
   );
 }
-function MiniBtn({ solid, small, onClick, children }) { return <button onClick={onClick} style={{ fontSize: small ? 10.5 : 12, fontWeight: 600, padding: small ? "3px 8px" : "6px 11px", borderRadius: small ? 6 : 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{children}</button>; }
+function MiniBtn({ solid, small, icon, onClick, children }) { return <button onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: small ? 10.5 : 12, fontWeight: 600, padding: small ? "3px 8px" : "6px 11px", borderRadius: small ? 6 : 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{icon && <MenuIcon name={icon} size={small ? 11 : 13} color={solid ? "#fff" : C.action} />}{children}</button>; }
 function SolidBtn({ onClick, disabled, children }) { return <button onClick={onClick} disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: disabled ? "default" : "pointer", border: "none", background: disabled ? C.grey : C.action, color: "#fff" }}>{children}</button>; }
 function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
 function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }

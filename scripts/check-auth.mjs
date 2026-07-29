@@ -16,7 +16,23 @@ assert.ok(!verifyPassword("correct horse", "garbage"), "malformed hash must fail
 assert.notStrictEqual(hashPassword("x"), hashPassword("x"), "salts must differ");
 
 // ChargeOver merge logic (pure, no DB) — match by id then email, preserve CRM fields
-const { mapCustomer, mergeCustomers } = await import("../lib/chargeover.js");
+const { mapCustomer, mergeCustomers, unround } = await import("../lib/chargeover.js");
+{
+  // ChargeOver rounds a package price to whole cents per MONTH, so annual
+  // figures come back a few cents out. Undo that, but only inside the window
+  // the rounding can actually produce.
+  assert.strictEqual(unround(399.96), 400, "$400/yr reported as 399.96");
+  assert.strictEqual(unround(249.96), 250, "$250/yr reported as 249.96");
+  assert.strictEqual(unround(649.92), 650, "$650/yr — the biggest undershoot seen");
+  assert.strictEqual(unround(2000.04), 2000, "overshoot corrects too");
+  assert.strictEqual(unround(3500.04), 3500, "overshoot at scale");
+  assert.strictEqual(unround(40), 40, "an exact price is untouched");
+  assert.strictEqual(unround(0), 0, "zero stays zero");
+  // Genuinely non-round prices must survive — snapping these would invent money.
+  assert.strictEqual(unround(20.83), 20.83, "a real $20.83/mo is not a rounding artefact");
+  assert.strictEqual(unround(399.5), 399.5, "50c off a dollar is a real price");
+  assert.strictEqual(unround(249.8), 249.8, "20c off is outside the rounding window");
+}
 {
   const m = mapCustomer({ customer_id: 42, company: "Acme", bill_contact: { name: "Jo", email: "JO@ACME.com" }, balance: 100 });
   assert.strictEqual(m.chargeoverId, "42", "maps customer_id");

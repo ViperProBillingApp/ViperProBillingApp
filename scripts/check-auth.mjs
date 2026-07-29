@@ -30,6 +30,14 @@ const { mapCustomer, mergeCustomers } = await import("../lib/chargeover.js");
   assert.deepStrictEqual([r.added, r.updated, r.clients.length], [0, 1, 1], "same id updates, no duplicate");
   assert.strictEqual(r.clients[0].company, "A Renamed", "identity refreshed on update");
 
+  // Retired customers must never be re-created by a sync. Deleting a
+  // ChargeOver-linked client used to be undone on the next sync, which silently
+  // rebuilt it WITHOUT its email/contact (ChargeOver's /customer has neither).
+  r = mergeCustomers({ clients: [] }, [mapCustomer({ customer_id: 69, company: "Hosts Destination Services, LLC" })]);
+  assert.deepStrictEqual([r.added, r.clients.length], [0, 0], "retired CO id is not re-added by sync");
+  r = mergeCustomers({ clients: [] }, [mapCustomer({ customer_id: 70, company: "Not retired" })]);
+  assert.strictEqual(r.added, 1, "a non-retired id still syncs normally");
+
   // match an existing manual client by email; preserve its CRM-only fields
   st = { clients: [{ id: "x", chargeoverId: "", email: "b@b.com", company: "B", tags: ["vip"], segment: "viper-current" }] };
   r = mergeCustomers(st, [mapCustomer({ customer_id: 9, company: "B", bill_contact: { email: "B@B.com" } })]);

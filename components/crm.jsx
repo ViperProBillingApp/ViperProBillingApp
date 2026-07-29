@@ -607,6 +607,7 @@ export default function CRM({ user }) {
   };
 
   const active = useMemo(() => clients.filter((c) => !c.archivedClient), [clients]);
+  const archived = useMemo(() => clients.filter((c) => c.archivedClient), [clients]);
   const bounced = active.filter((c) => c.emailStatus !== "ok");
 
   // merge: fold rows into existing clients by chargeoverId/email (CSV import
@@ -773,6 +774,7 @@ export default function CRM({ user }) {
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
               <MiniBtn solid small onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn small onClick={() => setModal("archived")}>Archived{archived.length ? ` · ${archived.length}` : ""}</MiniBtn>
               <MiniBtn small onClick={() => setModal("deleted")}>Deleted</MiniBtn>
               <MiniBtn small onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
@@ -820,6 +822,8 @@ export default function CRM({ user }) {
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
         officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
+      {modal === "archived" && <Modal wide title="Archived clients" onClose={() => setModal(null)}>
+        <ArchivedPanel archived={archived} onOpen={(id) => { setModal(null); setDetailId(id); }} onUpdateWithLog={updateWithLog} /></Modal>}
       {modal === "deleted" && <Modal wide title="Deleted clients" onClose={() => setModal(null)}><DeletedPanel isAdmin={user.role === "admin"} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r], { merge: false }); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
@@ -3927,6 +3931,42 @@ function EmptyState({ onImport, onSample }) {
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No clients yet</div>
         <div style={{ fontSize: 13, color: C.sub, maxWidth: 380, margin: "0 auto 18px" }}>Import your client CSV, or load sample data to explore arrears tracking, escalating reminders, the workflow board and contact recovery.</div>
         <div className="flex justify-center" style={{ gap: 8 }}><SolidBtn onClick={onImport}>Import CSV</SolidBtn><GhostBtn onClick={onSample}>Load sample data</GhostBtn></div>
+      </div>
+    </div>
+  );
+}
+
+// Archived clients in one place, with the same two restore actions the client
+// card's footer offers — a plain archive just comes back, a former customer is
+// reinstated (that pairing is what the card does, and half-clearing it leaves a
+// client that's live but still counted as gone).
+function ArchivedPanel({ archived, onOpen, onUpdateWithLog }) {
+  const list = useMemo(() => [...archived].sort((a, b) => (a.company || a.name || "").localeCompare(b.company || b.name || "")), [archived]);
+  const restore = (c) => (c.formerCustomer
+    ? onUpdateWithLog(c.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted" }, "status", "Reinstated as customer")
+    : onUpdateWithLog(c.id, { archivedClient: false }, "archive", "Client restored"));
+
+  if (!list.length) return <p style={{ fontSize: 13, color: C.sub }}>Nothing is archived. Archiving hides a client from the lists without deleting it.</p>;
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>
+        {list.length} archived client{list.length === 1 ? "" : "s"}. Restoring puts them straight back in the lists — nothing was lost.
+      </p>
+      <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" }}>
+        {list.map((c, i) => (
+          <div key={c.id} className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i ? `1px solid ${C.lineSoft}` : "none" }}>
+            <div role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                {c.company || c.name || "(no name)"}
+                {c.formerCustomer && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 5, padding: "1px 5px" }}>no longer a customer</span>}
+              </div>
+              <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {[c.name, c.email, c.chargeoverId && `CO#${c.chargeoverId}`].filter(Boolean).join(" · ")}
+              </div>
+            </div>
+            <MiniBtn solid onClick={() => restore(c)}>{c.formerCustomer ? "Reinstate" : "Restore"}</MiniBtn>
+          </div>
+        ))}
       </div>
     </div>
   );

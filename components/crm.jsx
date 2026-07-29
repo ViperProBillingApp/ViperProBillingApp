@@ -725,7 +725,25 @@ export default function CRM({ user }) {
     <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
       {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
-      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel, backgroundImage: "linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", border: `1px solid ${C.line}`, borderLeft: "none", borderRadius: "0 12px 12px 0", overflow: "hidden", padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3, position: "sticky", top: 0, height: "100vh" }}>
+      {/* Left menu as a 3D glass pane: the existing photo/gradient stack sits
+          under a curved specular sweep, a hard top lip, edge lighting and a
+          deep lifted shadow — same liquid-glass language as the tabs. */}
+      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel,
+        backgroundImage: "linear-gradient(115deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 22%, rgba(255,255,255,0) 45%), linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)",
+        backgroundSize: "cover", backgroundPosition: "center",
+        border: "1px solid rgba(255,255,255,0.6)", borderRadius: 16, overflow: "hidden",
+        boxShadow: [
+          "inset 0 2px 1px rgba(255,255,255,0.95)",        // specular lip along the top
+          "inset -2px 0 2px -1px rgba(255,255,255,0.55)",  // light catching the rounded right edge
+          "inset 0 -18px 26px -14px rgba(12,28,60,0.55)",  // depth pooling at the bottom
+          "inset -6px 0 14px -8px rgba(22,48,95,0.28)",    // inner falloff toward the edge
+          "6px 4px 22px -4px rgba(12,28,60,0.4)",          // lifted off the page
+          "2px 2px 6px rgba(22,48,95,0.18)",               // contact shadow
+        ].join(", "),
+        padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3,
+        // floats clear of the page edges so the background shows around it,
+        // vertically centred and staying put as you scroll
+        position: "sticky", top: 14, height: "calc(100vh - 28px)", margin: "14px 0 14px 10px" }}>
         <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -1194,29 +1212,40 @@ function StatStrip({ clients, settings, bounced }) {
   );
 }
 // Liquid-glass metric block over the original stepped light-blue tints: the
-// existing colour (as slightly-translucent rgb so the board gradient breathes
-// through), a specular white sweep across the top, an inner lip, a soft drop
-// below, and a large watermark glyph on the right.
+// existing colour (slightly translucent so the board gradient breathes
+// through) under a big curved specular reflection, a hard top lip, deep
+// bottom-edge shading and a lifted drop shadow — read as a 3D glass bubble.
+// Watermark glyph sits in the bottom-right corner.
 function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246" }) {
   return (
     <div style={{
       position: "relative", overflow: "hidden",
-      background: `linear-gradient(155deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.12) 48%, rgba(255,255,255,0) 100%), rgba(${bg},0.82)`,
-      backdropFilter: "blur(10px) saturate(1.4)", WebkitBackdropFilter: "blur(10px) saturate(1.4)",
-      borderRadius: 12, border: "1px solid rgba(255,255,255,0.55)", padding: "8px 10px",
-      boxShadow: "inset 0 1.5px 0 rgba(255,255,255,0.8), inset 0 -10px 14px -10px rgba(22,48,95,0.35), 0 4px 10px rgba(22,48,95,0.22)",
+      background: `linear-gradient(160deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.1) 42%, rgba(255,255,255,0) 60%, rgba(22,48,95,0.10) 100%), rgba(${bg},0.78)`,
+      backdropFilter: "blur(12px) saturate(1.5)", WebkitBackdropFilter: "blur(12px) saturate(1.5)",
+      borderRadius: 14, border: "1px solid rgba(255,255,255,0.6)", padding: "9px 10px",
+      boxShadow: [
+        "inset 0 2px 1px rgba(255,255,255,0.95)",          // hard specular lip on the top edge
+        "inset 2px 0 2px -1px rgba(255,255,255,0.5)",      // light catching the left edge
+        "inset 0 -14px 20px -12px rgba(22,48,95,0.55)",    // depth pooling at the bottom
+        "inset -3px 0 8px -4px rgba(22,48,95,0.25)",       // right-edge falloff
+        "0 10px 22px -6px rgba(12,28,60,0.5)",             // lifted off the board
+        "0 2px 5px rgba(22,48,95,0.25)",                   // contact shadow
+      ].join(", "),
     }}>
+      {/* Curved glare — the big window reflection across the top of the bubble */}
+      <div aria-hidden style={{ position: "absolute", left: "-12%", right: "28%", top: "-58%", height: "100%", borderRadius: "50%",
+        background: "linear-gradient(175deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.28) 60%, rgba(255,255,255,0) 100%)", pointerEvents: "none" }} />
       {icon && (
-        <div aria-hidden style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", opacity: 0.35, filter: "drop-shadow(0 1px 1px rgba(255,255,255,0.6))" }}>
-          <MenuIcon name={icon} size={34} color="#3B5BA5" />
+        <div aria-hidden style={{ position: "absolute", right: 7, bottom: 5, opacity: 0.35, filter: "drop-shadow(0 1px 1px rgba(255,255,255,0.6))" }}>
+          <MenuIcon name={icon} size={30} color="#3B5BA5" />
         </div>
       )}
-      <div style={{ position: "relative", paddingRight: 40 }}>
+      <div style={{ position: "relative", paddingRight: 36 }}>
         <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
-          <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0 }} />
+          <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0, boxShadow: "0 1px 2px rgba(22,48,95,0.4), inset 0 -1px 1px rgba(0,0,0,0.15)" }} />
           <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
         </div>
-        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25 }}>{value}</div>
+        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, textShadow: "0 1px 0 rgba(255,255,255,0.7)" }}>{value}</div>
         <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
       </div>
     </div>

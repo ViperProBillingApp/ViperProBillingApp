@@ -83,6 +83,8 @@ button:not(:disabled):active {
     align-items: center;
     gap: 2px !important;
     padding: 10px 10px 8px !important;
+    margin: 0 !important;          /* desktop floats it with gaps; the top bar sits flush */
+    border-radius: 0 !important;
     border-right: none !important;
     border-bottom: 1px solid #dfe4ec;
   }

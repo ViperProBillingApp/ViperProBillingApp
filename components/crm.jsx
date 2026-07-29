@@ -2956,6 +2956,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em" }}>
               {client.company || client.name}
+              <CopyNameBtn text={client.company || client.name} />
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
@@ -3889,6 +3890,20 @@ function Tab({ active, onClick, icon, onLight, children }) {
     }}>
       {icon && <MenuIcon name={icon} size={15} color={active ? C.action : onLight ? C.sub : "rgba(255,255,255,0.9)"} />}
       {children}
+    </button>
+  );
+}
+// Copy-to-clipboard button for the card title — copies the company name and
+// flips to a tick for a moment, same feedback pattern as the credential fields.
+function CopyNameBtn({ text }) {
+  const [ok, setOk] = useState(false);
+  const copy = (e) => { e.stopPropagation(); if (!text) return; navigator.clipboard?.writeText(text).then(() => { setOk(true); setTimeout(() => setOk(false), 1400); }); };
+  return (
+    <button onClick={copy} title={ok ? "Copied" : "Copy company name"} aria-label="Copy company name"
+      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, marginLeft: 7, verticalAlign: "middle", color: ok ? C.green : C.sub, display: "inline-flex" }}>
+      {ok
+        ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
+        : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
     </button>
   );
 }

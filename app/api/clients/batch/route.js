@@ -36,6 +36,7 @@ export async function PUT(req) {
   // F-01: keep stored secrets when the incoming (stripped) client has them blank.
   const map = new Map((state.clients || []).map((c) => [c.id, c]));
   for (const c of upserts) map.set(c.id, mergeClientSecrets(map.get(c.id), c));
+  const removed = deletes.map((id) => map.get(id)).filter(Boolean); // snapshot before dropping
   for (const id of deletes) map.delete(id);
   const newClients = encryptClients([...map.values()]); // F-01: encrypt secrets at rest (dormant until keyed)
   const nextRev = curRev + 1;
@@ -52,6 +53,18 @@ export async function PUT(req) {
     if (ins.rowCount === 0) return NextResponse.json({ error: "stale", rev: (JSON.parse((await db.query("SELECT value FROM kv WHERE key='state'")).rows[0].value).rev) || 0 }, { status: 409 });
   }
   await mirrorClients(db, newClients); // keep rows in lockstep
+
+  // Recycle bin: keep the full record so a delete can be undone from the UI.
+  // Best-effort — a failure here must not fail a save that already committed.
+  for (const c of removed) {
+    try {
+      await db.query(
+        `INSERT INTO deleted_clients (id, data, deleted_at, deleted_by) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, deleted_at = EXCLUDED.deleted_at, deleted_by = EXCLUDED.deleted_by`,
+        [c.id, JSON.stringify(c), Date.now(), user.email || ""]
+      );
+    } catch (e) { console.error("recycle-bin write failed:", e.message); }
+  }
 
   // Same bulk-drop breadcrumb the whole-blob path had — but now a diff can only
   // delete what it explicitly listed, so this should essentially never fire.

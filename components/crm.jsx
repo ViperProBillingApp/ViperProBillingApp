@@ -773,6 +773,7 @@ export default function CRM({ user }) {
             ))}
             <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
               <MiniBtn solid small onClick={() => setModal("import")}>Import CSV</MiniBtn>
+              <MiniBtn small onClick={() => setModal("deleted")}>Deleted</MiniBtn>
               <MiniBtn small onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
               <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
@@ -819,6 +820,7 @@ export default function CRM({ user }) {
       {compose && <ComposeModal client={compose} settings={settings} templates={templates} initialType={composeType} onClose={() => setComposeId(null)} onLogSent={logSent} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog}
         officeSiblings={compose.officeGroup ? clients.filter((o) => o.id !== compose.id && o.officeGroup === compose.officeGroup) : []} />}
       {modal === "import" && <Modal title="Import clients" onClose={() => setModal(null)}><ImportPanel onImport={(r) => { addClients(r); setModal(null); }} onSample={() => { addClients(SAMPLE); setModal(null); }} /></Modal>}
+      {modal === "deleted" && <Modal wide title="Deleted clients" onClose={() => setModal(null)}><DeletedPanel isAdmin={user.role === "admin"} /></Modal>}
       {modal === "add" && <Modal title="Add client" onClose={() => setModal(null)}><AddPanel onAdd={(r) => { addClients([r], { merge: false }); setModal(null); }} /></Modal>}
       {modal === "settings" && <Modal title="Settings" onClose={() => setModal(null)}><SettingsPanel settings={settings} onSave={(s) => { setSettings(s); setModal(null); }} /></Modal>}
       {modal === "emails" && <Modal title="Email templates" onClose={() => setModal(null)}><EmailTemplatesPanel settings={settings} onSave={setSettings} user={user} /></Modal>}
@@ -3926,6 +3928,82 @@ function EmptyState({ onImport, onSample }) {
         <div style={{ fontSize: 13, color: C.sub, maxWidth: 380, margin: "0 auto 18px" }}>Import your client CSV, or load sample data to explore arrears tracking, escalating reminders, the workflow board and contact recovery.</div>
         <div className="flex justify-center" style={{ gap: 8 }}><SolidBtn onClick={onImport}>Import CSV</SolidBtn><GhostBtn onClick={onSample}>Load sample data</GhostBtn></div>
       </div>
+    </div>
+  );
+}
+
+// Recycle bin for clients removed with "Delete permanently". Restore writes on
+// the server (the record never left the DB), so the page reloads afterwards
+// rather than trying to splice a client into a now-stale local copy.
+function DeletedPanel({ isAdmin }) {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const [confirmPurge, setConfirmPurge] = useState("");
+
+  const load = useCallback(async () => {
+    setErr("");
+    try {
+      const r = await fetch("/api/clients/deleted");
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Could not load the deleted list.");
+      setRows(d.deleted);
+    } catch (e) { setErr(e.message); setRows([]); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const act = async (id, method) => {
+    setBusy(id); setErr("");
+    try {
+      const r = await fetch(method === "DELETE" ? `/api/clients/deleted?id=${encodeURIComponent(id)}` : "/api/clients/deleted",
+        method === "DELETE" ? { method } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "That didn't work.");
+      if (method === "DELETE") { setRows((p) => p.filter((x) => x.id !== id)); setConfirmPurge(""); }
+      else window.location.reload(); // pick the restored client up with a fresh rev
+    } catch (e) { setErr(e.message); setBusy(""); }
+  };
+
+  if (rows === null) return <p style={{ fontSize: 13, color: C.sub }}>Loading…</p>;
+  return (
+    <div>
+      {err && <p style={{ fontSize: 13, color: C.red, fontWeight: 600, marginBottom: 12 }}>{err}</p>}
+      {rows.length === 0 ? (
+        <p style={{ fontSize: 13, color: C.sub }}>Nothing has been deleted. Clients removed with “Delete permanently” land here and can be put back.</p>
+      ) : (
+        <>
+          <p style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>
+            {rows.length} deleted client{rows.length === 1 ? "" : "s"}. Restoring puts the whole record back — notes, portal logins, history and all.
+          </p>
+          <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" }}>
+            {rows.map((c, i) => (
+              <div key={c.id} className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i ? `1px solid ${C.lineSoft}` : "none" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
+                    {c.company || c.name || "(no name)"}
+                    {c.syncExcluded && <span title="On the ChargeOver never-resurrect list — restoring will not resume syncing" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 5, padding: "1px 5px" }}>sync-excluded</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {[c.email, c.chargeoverId && `CO#${c.chargeoverId}`, `deleted ${new Date(c.deletedAt).toLocaleDateString()}${c.deletedBy ? ` by ${c.deletedBy}` : ""}`].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                {confirmPurge === c.id ? (
+                  <>
+                    <span style={{ fontSize: 11.5, color: C.red, fontWeight: 600 }}>Erase for good?</span>
+                    <MiniBtn onClick={() => act(c.id, "DELETE")}>Erase</MiniBtn>
+                    <MiniBtn onClick={() => setConfirmPurge("")}>Cancel</MiniBtn>
+                  </>
+                ) : (
+                  <>
+                    <MiniBtn solid onClick={() => act(c.id, "POST")}>{busy === c.id ? "Restoring…" : "Restore"}</MiniBtn>
+                    {isAdmin && <MiniBtn onClick={() => setConfirmPurge(c.id)}>Erase</MiniBtn>}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -296,6 +296,10 @@ function normalise(r) {
     maritzUserLists: Array.isArray(r.maritzUserLists) ? r.maritzUserLists : [], // captured Maritz portal users, dated
     formerCustomer: !!r.formerCustomer,
     userLists: Array.isArray(r.userLists) ? r.userLists : [], // captured portal employee lists, dated for change-tracking
+    // Portal users who only hold reporting access — marked on the list and
+    // excluded from the billable user count. Keyed by name so the flag
+    // survives future list captures.
+    reportingOnlyUsers: Array.isArray(r.reportingOnlyUsers) ? r.reportingOnlyUsers : [],
     multiOffice: !!r.multiOffice, // part of a multi-office group (e.g. a "Destination Asia" office)
     // the standalone "<Name> (Group)" billing card, not a real office — excluded from the office count.
     // Self-heal for cards created before this field existed: a group-master whose company ends in "(Group)".
@@ -3471,15 +3475,16 @@ function isCurrentUser(u) {
 // Plain-text block of a user list for pasting into an email to the client.
 function userListToText(client, list) {
   const lines = [`${client.company || client.name} — portal users (collected ${fmtDate(list.collectedAt)})`, ""];
-  let count = 0;
+  let count = 0, reporting = 0;
   for (const u of list.users || []) {
     if (isSiteAdmin(u)) continue;
     const name = u[0] || "";
     const title = u[1] ? ` — ${u[1]}` : "";
     const last = u[7] && u[7] !== "-" ? ` (last login ${u[7]})` : "";
-    if (name) { lines.push(`• ${name}${title}${last}`); count++; }
+    const rep = isReportingOnly(client, u);
+    if (name) { lines.push(`• ${name}${title}${last}${rep ? " — reporting only" : ""}`); rep ? reporting++ : count++; }
   }
-  lines.push("", `${count} users`);
+  lines.push("", `${count} users${reporting ? ` + ${reporting} reporting only` : ""}`);
   return lines.join("\n");
 }
 // One captured user list: dated header, copy-for-email, archive/delete, expandable table.
@@ -3502,7 +3507,11 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
         <button onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.ink }}>
           {open ? "▾" : "▸"} Collected {fmtDate(list.collectedAt)}
         </button>
-        <span style={{ fontSize: 11.5, color: C.faint }}>{rows.filter((u) => !isSiteAdmin(u)).length} users{list.archived ? " · archived" : ""}{draft ? " · editing" : ""}</span>
+        <span style={{ fontSize: 11.5, color: C.faint }}>
+          {rows.filter((u) => !isSiteAdmin(u)).length} users
+          {(() => { const n = rows.filter((u) => isReportingOnly(client, u)).length; return n ? ` · ${n} reporting only` : ""; })()}
+          {list.archived ? " · archived" : ""}{draft ? " · editing" : ""}
+        </span>
         <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
           {draft ? (
             <>
@@ -3533,10 +3542,13 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
               {rows.map((u, i) => (
                 <tr key={i}>
                   {USERLIST_VIEW.map((j) => (
-                    <td key={j} style={{ padding: draft ? "2px 4px" : "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: u[j] && u[j] !== "-" ? C.ink : C.faint, whiteSpace: "nowrap" }}>
+                    <td key={j} style={{ padding: draft ? "2px 4px" : "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: u[j] && u[j] !== "-" ? C.ink : C.faint, whiteSpace: "nowrap", opacity: !draft && isReportingOnly(client, u) ? 0.65 : 1 }}>
                       {draft
                         ? <input value={u[j] ?? ""} onChange={(e) => editCell(i, j, e.target.value)} style={{ fontSize: 11.5, padding: "3px 5px", borderRadius: 5, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, width: j === LAST_LOGIN_IDX ? 130 : j === 0 ? 130 : 100 }} />
                         : (u[j] && u[j] !== "-" ? u[j] : "—")}
+                      {!draft && j === 0 && isReportingOnly(client, u) && (
+                        <span title="Reporting access only — excluded from the billable user count" style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 4, padding: "1px 4px", verticalAlign: "middle" }}>reporting only</span>
+                      )}
                     </td>
                   ))}
                   {draft && <td style={{ padding: "2px 4px", borderBottom: `1px solid ${C.lineSoft}` }}><button onClick={() => delRow(i)} title="Remove user" style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 13 }}>✕</button></td>}
@@ -3585,12 +3597,16 @@ function PortalUsers({ client, onUpdate }) {
     </Section>
   );
 }
-// Current (non-terminated, non-expired) users in the most recent active list.
+// A user the client has told us only holds reporting access — never billable.
+function isReportingOnly(client, u) {
+  return (client?.reportingOnlyUsers || []).includes((u && u[0]) || "");
+}
+// Current (non-terminated, non-expired, non-reporting) users in the most recent active list.
 function currentUserCount(client) {
   const active = (client.userLists || []).filter((l) => !l.archived);
   if (!active.length) return 0;
   const latest = active.slice().sort((a, b) => new Date(b.collectedAt) - new Date(a.collectedAt))[0];
-  return (latest.users || []).filter(isCurrentUser).length;
+  return (latest.users || []).filter((u) => isCurrentUser(u) && !isReportingOnly(client, u)).length;
 }
 // Tiered monthly Viper price. 1..(tier2Min-1) = flat base; up to (tier3Min-1) = tier2/user; then tier3/user.
 function viperMonthly(n, p) {

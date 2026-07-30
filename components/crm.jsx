@@ -3016,7 +3016,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           </div>
         </div>
         {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page */}
-        <div className="flex items-end" style={{ gap: 3, padding: "6px 20px 0" }}>
+        <div className="flex items-end" style={{ gap: 8, padding: "6px 20px 0" }}>
           {[["info", "Info", "info"], ["emails", "Emails", "mail"], ["billing", "Billing", "billing"], ["portal", "Portal", "portal"]].map(([k, t, ic]) => (
             <Tab key={k} icon={ic} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
@@ -3914,8 +3914,8 @@ function Tab({ active, onClick, icon, onLight, children }) {
       boxShadow: active
         ? "0 -3px 6px rgba(34,48,76,0.08)"
         : onLight
-          ? "inset 0 1.5px 0 rgba(255,255,255,0.8), inset 0 -8px 12px -6px rgba(22,48,95,0.22), 0 2px 5px rgba(22,48,95,0.10)"
-          : "inset 0 1.5px 0 rgba(255,255,255,0.55), inset 0 -8px 12px -6px rgba(22,48,95,0.5), 0 2px 6px rgba(22,48,95,0.18)",
+          ? "inset 0 1.5px 0 rgba(255,255,255,0.8), inset 0 -8px 12px -6px rgba(22,48,95,0.22), 0 2px 4px -2px rgba(22,48,95,0.10)"
+          : "inset 0 1.5px 0 rgba(255,255,255,0.55), inset 0 -8px 12px -6px rgba(22,48,95,0.5), 0 2px 4px -2px rgba(22,48,95,0.18)",
       transition: "all 0.12s ease-out", zIndex: active ? 2 : 1,
     }}>
       {icon && <MenuIcon name={icon} size={15} color={active ? C.action : onLight ? C.sub : "rgba(255,255,255,0.9)"} />}

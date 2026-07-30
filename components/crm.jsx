@@ -726,7 +726,13 @@ export default function CRM({ user }) {
   const compose = clients.find((c) => c.id === composeId);
 
   return (
-    <div className="crm-root" style={{ background: C.paper, minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
+    // Page background: blue smoke art under a white wash to lighten it, fixed
+    // so the glass panes' backdrop blur has something to refract as you scroll.
+    <div className="crm-root" style={{
+      backgroundColor: C.paper,
+      backgroundImage: "linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), url(/page-bg.jpg)",
+      backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed",
+      minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
       {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
       {/* Left menu as a 3D glass pane: the existing photo/gradient stack sits

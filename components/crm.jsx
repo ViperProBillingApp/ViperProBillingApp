@@ -3910,7 +3910,10 @@ function Tab({ active, onClick, icon, onLight, children }) {
       WebkitBackdropFilter: active ? undefined : "blur(9px) saturate(1.35)",
       color: active ? C.ink : onLight ? C.sub : "rgba(255,255,255,0.92)",
       textShadow: active || onLight ? undefined : "0 1px 2px rgba(22,48,95,0.35)",
-      marginBottom: -1, position: "relative", top: active ? 0 : 2,
+      // Active pane droops 1px to cover the container's bottom border and fuse
+      // with the content; inactive panes stop EXACTLY at the border (no offset)
+      // so their rounded bottoms can't spill onto the content below.
+      marginBottom: active ? -1 : 0, position: "relative",
       boxShadow: active
         ? "0 -3px 6px rgba(34,48,76,0.08)"
         : onLight

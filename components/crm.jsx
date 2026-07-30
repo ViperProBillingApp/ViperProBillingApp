@@ -1468,7 +1468,7 @@ function HeaderFilter({ label, value, onChange, options, align = "left" }) {
 
 // Mail icon → small popover menu to pick which template to send before the
 // compose dialog opens, instead of always defaulting to "Payment reminder".
-function EmailIconMenu({ client, templates, onPick }) {
+function EmailIconMenu({ client, templates, onPick, light }) {
   // Menu is portalled to <body> with fixed coords: absolute positioning gets
   // trapped by the archived rows' opacity stacking context and clipped by the
   // table's overflow, so it wouldn't overlay the rows below.
@@ -1481,8 +1481,8 @@ function EmailIconMenu({ client, templates, onPick }) {
   return (
     <div style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
       <button onClick={toggle} title="Email this client" aria-label={`Email ${client.company || client.name}`}
-        style={{ background: "none", border: "none", cursor: "pointer", color: C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+        style={{ background: "none", border: "none", cursor: "pointer", color: light ? "rgba(255,255,255,0.9)" : C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = light ? "rgba(255,255,255,0.18)" : C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
       </button>
       {menu && createPortal(
@@ -2980,16 +2980,17 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
     // (the "abrupt close while selecting" bug). Same fix in confirm + Modal.
     <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.panel, borderBottom: `1px solid ${C.line}` }}>
+        {/* Card header on the board gradient — white title/controls, same glass tabs as the main page */}
+        <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.boardGradient, borderBottom: `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px", gap: 12 }}>
           <div style={{ minWidth: 0 }}>
-            <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em" }}>
+            <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em", color: "#fff" }}>
               {client.company || client.name}
-              <CopyNameBtn text={client.company || client.name} />
-              {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: C.faint, marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
+              <CopyNameBtn text={client.company || client.name} light />
+              {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.7)", marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
-            {behind >= 1 && <div style={{ fontSize: 12, color: C.red, fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
+            {behind >= 1 && <div style={{ fontSize: 12, color: "#FFB4AD", fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
             {/* Office inside a group: one click back to the group billing card */}
             {client.multiOffice && !client.groupBillingMaster && (() => {
               const master = officeSiblings.find((o) => o.groupBillingMaster);
@@ -3005,19 +3006,19 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           <div className="flex items-center" style={{ gap: 12, flexShrink: 0 }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
               <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
-                style={{ fontSize: 12, fontWeight: 600, color: SEGMENTS[client.segment].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlign: "right" }}>
-                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlign: "right" }}>
+                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k} style={{ color: C.ink }}>{v.label}</option>)}
               </select>
-              <span style={{ fontSize: 11, color: SEGMENTS[client.segment].color, pointerEvents: "none" }}>▾</span>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", pointerEvents: "none" }}>▾</span>
             </span>
-            {onEmail && <EmailIconMenu client={client} templates={drawerTemplates} onPick={(type) => onEmail(client.id, type)} />}
-            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: C.sub, cursor: "pointer" }}>✕</button>
+            {onEmail && <EmailIconMenu light client={client} templates={drawerTemplates} onPick={(type) => onEmail(client.id, type)} />}
+            <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: "rgba(255,255,255,0.85)", cursor: "pointer" }}>✕</button>
           </div>
         </div>
         {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page */}
         <div className="flex items-end" style={{ gap: 3, padding: "6px 20px 0" }}>
           {[["info", "Info", "info"], ["emails", "Emails", "mail"], ["billing", "Billing", "billing"], ["portal", "Portal", "portal"]].map(([k, t, ic]) => (
-            <Tab key={k} icon={ic} onLight active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
+            <Tab key={k} icon={ic} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
         </div>
         </div>
@@ -3924,12 +3925,12 @@ function Tab({ active, onClick, icon, onLight, children }) {
 }
 // Copy-to-clipboard button for the card title — copies the company name and
 // flips to a tick for a moment, same feedback pattern as the credential fields.
-function CopyNameBtn({ text }) {
+function CopyNameBtn({ text, light }) {
   const [ok, setOk] = useState(false);
   const copy = (e) => { e.stopPropagation(); if (!text) return; navigator.clipboard?.writeText(text).then(() => { setOk(true); setTimeout(() => setOk(false), 1400); }); };
   return (
     <button onClick={copy} title={ok ? "Copied" : "Copy company name"} aria-label="Copy company name"
-      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, marginLeft: 7, verticalAlign: "middle", color: ok ? C.green : C.sub, display: "inline-flex" }}>
+      style={{ background: "none", border: "none", cursor: "pointer", padding: 2, marginLeft: 7, verticalAlign: "middle", color: ok ? (light ? "#8FE6BC" : C.green) : (light ? "rgba(255,255,255,0.85)" : C.sub), display: "inline-flex" }}>
       {ok
         ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
         : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}

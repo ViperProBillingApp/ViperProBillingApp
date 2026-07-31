@@ -272,6 +272,7 @@ function normalise(r) {
     coBalance: r.coBalance != null ? Number(r.coBalance) || 0 : null, // live from ChargeOver, null = never synced
     coAmountAt: r.coAmountAt || "", // when the recurring amount was last read from CO billing packages
     coOverdue: r.coOverdue != null ? Number(r.coOverdue) || 0 : null, // overdue-only balance; null = not synced yet
+    coOverdueCount: r.coOverdueCount != null ? Number(r.coOverdueCount) || 0 : null, // # overdue invoices = exact periods behind; self-heals on next sync
     // Field-absent (undefined) means this record predates inChargeOver and was
     // never explicitly set — infer true from having a ChargeOver ID rather than
     // silently defaulting to false, so an old cached client state can't wipe it.

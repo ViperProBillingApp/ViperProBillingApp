@@ -377,6 +377,7 @@ export default function CRM({ user }) {
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [tab, setTab] = useState("digest");
   const [modal, setModal] = useState(null);
+  const [menuOpen, setMenuOpen] = useState(false); // phone-only hamburger menu; ignored on desktop
   const [detailId, setDetailId] = useState(null);
   const [composeId, setComposeId] = useState(null);
   const [composeType, setComposeType] = useState("reminder");
@@ -734,12 +735,24 @@ export default function CRM({ user }) {
       backgroundImage: "linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), url(/page-bg.jpg)",
       backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed",
       minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
-      {/* Left navigation panel — becomes a horizontal top bar under 768px (see globals.css) */}
+      {/* Phone-only top bar: wordmark + hamburger. Hidden on desktop (globals.css).
+          The menu itself is the same aside, shown as a full-screen sheet when open. */}
+      <div className="crm-mobilebar">
+        <Wordmark size={22} />
+        <button onClick={() => setMenuOpen((o) => !o)} aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: 8, margin: -8, color: C.ink, display: "inline-flex" }}>
+          {menuOpen
+            ? <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+            : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>}
+        </button>
+      </div>
+      {/* Left navigation panel — hidden behind the hamburger under 768px (see globals.css) */}
       {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
       {/* Left menu as a 3D glass pane: the existing photo/gradient stack sits
           under a curved specular sweep, a hard top lip, edge lighting and a
           deep lifted shadow — same liquid-glass language as the tabs. */}
-      <aside className="crm-aside" style={{ width: 194, flexShrink: 0, backgroundColor: C.panel,
+      <aside className={`crm-aside${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen(false)}
+        style={{ width: 194, flexShrink: 0, backgroundColor: C.panel,
         backgroundImage: "linear-gradient(115deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 22%, rgba(255,255,255,0) 45%), linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)",
         backgroundSize: "cover", backgroundPosition: "center",
         border: "1px solid rgba(255,255,255,0.6)", borderRadius: 16, overflow: "hidden",
@@ -919,10 +932,12 @@ function MenuItem({ onClick, active, icon, children, light }) {
       style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: light ? "#fff" : active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
     >
       {icon && <MenuIcon name={icon} color={light ? "#fff" : C.action} />}
-      {/* Multi-word labels break at the first space so every item is at most two lines */}
+      {/* Multi-word labels break at the first space so every item is at most two
+          lines on the desktop rail; the phone sheet flattens the break back to a
+          space via .crm-menu-gap (globals.css) */}
       <span style={{ lineHeight: 1.25 }}>
         {typeof children === "string" && children.includes(" ")
-          ? <>{children.slice(0, children.indexOf(" "))}<br />{children.slice(children.indexOf(" ") + 1)}</>
+          ? <>{children.slice(0, children.indexOf(" "))}<span className="crm-menu-gap"><br /></span>{children.slice(children.indexOf(" ") + 1)}</>
           : children}
       </span>
     </button>

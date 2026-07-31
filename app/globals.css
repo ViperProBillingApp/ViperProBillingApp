@@ -70,35 +70,62 @@ button:not(:disabled):active {
   button:not(:disabled):active { transform: none; }
 }
 
-/* CRM shell on phones: the sidebar becomes a wrapping top bar and the
-   clients table scrolls sideways instead of crushing its 8 columns. */
+/* Phone-only header bar (wordmark + hamburger). Plain and opaque on purpose —
+   this is the one piece of chrome that must never be hard to read or tap. */
+.crm-mobilebar { display: none; }
+
+/* CRM shell on phones: the sidebar hides behind the hamburger and opens as a
+   full-screen sheet of big tap targets; the clients table scrolls sideways
+   instead of crushing its 8 columns. */
 @media (max-width: 767px) {
   .crm-root { flex-direction: column; }
-  .crm-aside {
-    position: static !important;
-    width: 100% !important;
-    height: auto !important;
-    flex-direction: row !important;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 2px !important;
-    padding: 10px 10px 8px !important;
-    margin: 0 !important;          /* desktop floats it with gaps; the top bar sits flush */
-    border-radius: 0 !important;
-    border-right: none !important;
-    border-bottom: 1px solid #dfe4ec;
-  }
-  .crm-aside > div:first-child { width: 100%; padding: 0 4px 8px !important; }
-  .crm-aside button { width: auto !important; font-size: 12.5px !important; padding: 8px 9px !important; }
-  .crm-aside-footer {
-    margin-top: 0 !important;
-    padding-top: 0 !important;
-    border-top: none !important;
+  .crm-mobilebar {
     display: flex;
     align-items: center;
-    margin-left: auto;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: #fff;
+    padding: 12px 16px;
+    border-bottom: 1px solid #dfe4ec;
   }
-  .crm-aside-footer > div { display: none; } /* email label: redundant on a cramped bar */
+  .crm-aside { display: none !important; }
+  .crm-aside.open {
+    /* Full-screen sheet below the bar. One plain white column — no glass,
+       no photo, no shadows: simple to read, nothing to mis-tap. */
+    display: flex !important;
+    position: fixed !important;
+    top: 49px; left: 0; right: 0; bottom: 0;
+    z-index: 39;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    overflow-y: auto !important;
+    padding: 10px 12px 24px !important;
+    gap: 2px !important;
+  }
+  .crm-aside.open > div:first-child { display: none; } /* wordmark — already in the bar */
+  .crm-aside.open button {
+    width: 100%;
+    font-size: 15px !important;
+    padding: 13px 12px !important;
+    border-radius: 10px;
+    color: #26262A !important;
+  }
+  .crm-aside.open button svg { stroke: #3B5BA5; }
+  /* One line per item: flatten the desktop rail's two-line break back to a space */
+  .crm-aside.open .crm-menu-gap br { display: none; }
+  .crm-aside.open .crm-menu-gap::after { content: " "; }
+  .crm-aside-footer {
+    margin-top: 12px !important;
+    border-top: 1px solid #dfe4ec !important;
+  }
+  .crm-aside.open .crm-aside-footer > div { color: #58585A !important; }
   .crm-table { overflow-x: auto !important; }
   .crm-table > div { min-width: 860px; }
 }

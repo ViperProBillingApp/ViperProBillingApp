@@ -2773,7 +2773,9 @@ function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen })
   const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
   const followUps = clients.filter((c) => needsFollowUp(c, now))
     .sort((a, b) => (followUpDue(b, now) - followUpDue(a, now)) || STAGES[a.stage].order - STAGES[b.stage].order);
-  const activeC = clients.filter((c) => !c.archivedClient && !c.formerCustomer);
+  // Same rule as the Follow-ups list: offices covered by a group card are
+  // chased via the master card, so they don't inflate these counts either.
+  const activeC = clients.filter((c) => !c.archivedClient && !c.formerCustomer && !coveredByGroup(c));
   const needContact = activeC.filter((c) => c.stage === "need-to-contact");
   const awaitingReply = activeC.filter((c) => c.stage === "contacted-awaiting");
   const pendingContacts = clients.filter((c) => c.candidates?.length > 0);

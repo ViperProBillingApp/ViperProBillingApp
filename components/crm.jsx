@@ -2452,9 +2452,13 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       l = [...l.filter((c) => !sentInRound(c, cp, r)), ...l.filter((c) => sentInRound(c, cp, r))];
       return [l, before - l.length];
     }
+    // Offices covered by a group card never get their own billing emails — the
+    // group's master card is the audience member. (Campaign audiences above are
+    // frozen memberIds picked by hand, so they're left as chosen.)
+    const billable = clients.filter((c) => !coveredByGroup(c));
     if (aud !== "auto") {
       // Explicit audience: a billing status, or a customer group.
-      l = clients.filter((c) =>
+      l = billable.filter((c) =>
         aud === "grp:maritz" ? c.maritzPortal :
         aud === "grp:viper" ? c.viperCustomer :
         // billable multi-office entities: group cards + independently billed offices
@@ -2462,9 +2466,9 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         c.billingStatus === aud.slice(5));
       l = [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || (a.company || a.name).localeCompare(b.company || b.name));
     } else if (type === "deletion") {
-      l = clients.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
+      l = billable.filter((c) => c.stage === "marked-deletion" || c.billingStatus === "marked-deletion");
     } else {
-      l = clients.filter((c) => c.stage !== "marked-deletion");
+      l = billable.filter((c) => c.stage !== "marked-deletion");
       if (type === "reminder") l = [...l.filter((c) => needsReminder(c))].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a));
       if (type === "price") l = l.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined"));
     }

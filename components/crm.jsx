@@ -273,6 +273,7 @@ function normalise(r) {
     coAmountAt: r.coAmountAt || "", // when the recurring amount was last read from CO billing packages
     coOverdue: r.coOverdue != null ? Number(r.coOverdue) || 0 : null, // overdue-only balance; null = not synced yet
     coOverdueCount: r.coOverdueCount != null ? Number(r.coOverdueCount) || 0 : null, // # overdue invoices = exact periods behind; self-heals on next sync
+    website: (r.website || "").trim(), // company website
     // Field-absent (undefined) means this record predates inChargeOver and was
     // never explicitly set — infer true from having a ChargeOver ID rather than
     // silently defaulting to false, so an old cached client state can't wipe it.
@@ -3062,6 +3063,9 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Field label="Company"><input style={inputStyle} value={client.company} onChange={(e) => set({ company: e.target.value })} /></Field>
             <Field label="Email"><input style={inputStyle} value={client.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Phone"><input style={inputStyle} value={client.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
+            <Field label={client.website ? <span>Website · <a href={/^https?:\/\//.test(client.website) ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" style={{ color: C.action }}>open ↗</a></span> : "Website"}>
+              <input style={inputStyle} value={client.website || ""} onChange={(e) => set({ website: e.target.value })} placeholder="company.com" />
+            </Field>
             <Field label="ChargeOver ID"><input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" /></Field>
             <Field label="Owner">
               <CompactSelect value={client.owner || ""} onChange={(e) => set({ owner: e.target.value })}>

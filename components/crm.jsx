@@ -28,7 +28,9 @@ const BILLING = {
   "never-charged": { label: "Never charged", color: C.grey, bg: C.greyBg },
   "payment-failed": { label: "Payment failed", color: C.red, bg: C.redBg },
   "no-payment-method": { label: "No payment method", color: C.amber, bg: C.amberBg },
-  "marked-deletion": { label: "Marked for deletion", color: C.grey, bg: C.greyBg },
+  // Key stays "marked-deletion" — it's persisted on every client and keys the
+  // send log. Only the label Darryl sees changed.
+  "marked-deletion": { label: "Marked for Suspension", color: C.grey, bg: C.greyBg },
 };
 const STAGES = {
   "not-contacted": { label: "Not contacted", color: "#8A94A6", order: 0 },
@@ -37,7 +39,7 @@ const STAGES = {
   "replied": { label: "Replied · needs action", color: "#8A5CD1", order: 2.5 },
   "up-to-date": { label: "Up to date", color: C.green, order: 3 },
   "on-hold": { label: "On hold", color: "#7A4FB5", order: 4 },
-  "marked-deletion": { label: "Marked for deletion", color: C.red, order: 5 },
+  "marked-deletion": { label: "Marked for Suspension", color: C.red, order: 5 },
 };
 const STAGE_ORDER = Object.keys(STAGES).sort((a, b) => STAGES[a].order - STAGES[b].order);
 // Tasks board (Workflow tab): lanes, category labels, and the account-edit flag
@@ -178,14 +180,16 @@ Everything you use today stays exactly as it is — this reflects continued inve
 
 ${SIGNATURE}`,
   },
+  // Template key stays "deletion" — it keys every past send in c.reminders
+  // ("deletion:YYYY-MM"); renaming it would orphan that history.
   deletion: {
-    label: "Account scheduled for deletion",
-    subject: (c, s) => `Your ${s.businessName} account is scheduled for deletion`,
+    label: "Account scheduled for suspension",
+    subject: (c, s) => `Your ${s.businessName} account is scheduled for suspension`,
     body: (c, s) => `Hi ${firstName(c.name)},
 
-Your ${s.businessName} account is currently scheduled for deletion.
+Your ${s.businessName} account is currently scheduled for suspension.
 
-If you'd like to keep your account, reply to this email or contact us at ${FROM_EMAIL} and we'll pause the process straight away. If we don't hear from you, the account and its data will be removed on the scheduled date.
+If you'd like to keep your account active, reply to this email or contact us at ${FROM_EMAIL} and we'll pause the process straight away. If we don't hear from you, access to the account will be suspended on the scheduled date.
 
 If you believe this is in error, let us know and we'll sort it out.
 
@@ -844,7 +848,7 @@ export default function CRM({ user }) {
         ) : (
           <>
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
-            {/* Archived former customers still surface on the board while marked for deletion */}
+            {/* Archived former customers still surface on the board while marked for suspension */}
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={recoverable} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
@@ -2510,7 +2514,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
   const audienceHint = {
     reminder: "everyone overdue or not up to date in ChargeOver",
     price: "everyone on old pricing",
-    deletion: "accounts marked for deletion",
+    deletion: "accounts marked for suspension",
   }[type] || "all contactable clients";
 
   if (view === "campaigns") {
@@ -3325,8 +3329,8 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <button
               onClick={() => client.formerCustomer
                 ? onUpdateWithLog(client.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted" }, "status", "Reinstated as customer")
-                : onUpdateWithLog(client.id, { formerCustomer: true, archivedClient: true, stage: "marked-deletion", workflowHidden: false }, "status", "No longer a customer — archived, marked for deletion")}
-              title={client.formerCustomer ? "Reinstate as a current customer" : "Archive this card and mark it for deletion in the workflow"}
+                : onUpdateWithLog(client.id, { formerCustomer: true, archivedClient: true, stage: "marked-deletion", workflowHidden: false }, "status", "No longer a customer — archived")}
+              title={client.formerCustomer ? "Reinstate as a current customer" : "No longer a customer — archive this card"}
               style={footBtn(client.formerCustomer ? null : C.red)}>
               {client.formerCustomer ? "↩ Reinstate customer" : "No longer a customer"}
             </button>

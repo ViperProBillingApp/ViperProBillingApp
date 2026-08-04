@@ -3063,9 +3063,6 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Field label="Company"><input style={inputStyle} value={client.company} onChange={(e) => set({ company: e.target.value })} /></Field>
             <Field label="Email"><input style={inputStyle} value={client.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Phone"><input style={inputStyle} value={client.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
-            <Field label={client.website ? <span>Website · <a href={/^https?:\/\//.test(client.website) ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" style={{ color: C.action }}>open ↗</a></span> : "Website"}>
-              <input style={inputStyle} value={client.website || ""} onChange={(e) => set({ website: e.target.value })} placeholder="company.com" />
-            </Field>
             <Field label="ChargeOver ID"><input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" /></Field>
             <Field label="Owner">
               <CompactSelect value={client.owner || ""} onChange={(e) => set({ owner: e.target.value })}>
@@ -3086,6 +3083,9 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             </Field>
             <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
             <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
+            <Field label={client.website ? <span>Website · <a href={/^https?:\/\//.test(client.website) ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" style={{ color: C.action }}>open ↗</a></span> : "Website"}>
+              <input style={inputStyle} value={client.website || ""} onChange={(e) => set({ website: e.target.value })} placeholder="company.com" />
+            </Field>
           </div>
 
           {/* Multi-office group */}

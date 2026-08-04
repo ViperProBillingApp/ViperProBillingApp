@@ -618,6 +618,10 @@ export default function CRM({ user }) {
   const active = useMemo(() => clients.filter((c) => !c.archivedClient), [clients]);
   const archived = useMemo(() => clients.filter((c) => c.archivedClient), [clients]);
   const bounced = active.filter((c) => c.emailStatus !== "ok");
+  // The Recovery tab must also show clients whose email reads as deliverable but
+  // still have candidates waiting — otherwise Today's "awaiting approval" count
+  // points at a page that says "nothing here" and can never be worked down.
+  const recoverable = active.filter((c) => c.emailStatus !== "ok" || c.candidates?.length > 0);
 
   // merge: fold rows into existing clients by chargeoverId/email (CSV import
   // dedupe). Manual "Add client" passes merge:false — always creates, since
@@ -842,7 +846,7 @@ export default function CRM({ user }) {
             {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {/* Archived former customers still surface on the board while marked for deletion */}
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
-            {tab === "recovery" && <RecoveryTab bounced={bounced} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
+            {tab === "recovery" && <RecoveryTab bounced={recoverable} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
             {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} replyCount={replies.length + unmatched.length} onGo={setTab} onOpen={setDetailId} />}
             {tab === "replies" && <RepliesTab replies={replies} unmatched={unmatched} clients={clients} templates={templates} settings={settings} signatureImage={signatureImage} onOpen={setDetailId} onRefresh={loadReplies} />}

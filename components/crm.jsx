@@ -1260,6 +1260,9 @@ function StatStrip({ clients, settings, bounced, onFocus }) {
 // bottom-edge shading and a lifted drop shadow — read as a 3D glass bubble.
 // Watermark glyph sits in the bottom-right corner.
 // `onClick` turns the tile into a button that drills into the clients behind it.
+// Glass-pill treatment: a near-clear lens (light blue barely tints it) with a
+// full bevel rim — bright on top, still lit (not shadowed) on the bottom edge,
+// the way a moulded glass/gel button reads light from every side, not just one.
 function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onClick, title }) {
   const Tag = onClick ? "button" : "div";
   return (
@@ -1268,21 +1271,23 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onCl
       // Button reset — the glass styling below assumes a plain box.
       font: "inherit", color: "inherit", textAlign: "left", width: "100%", display: "block",
       cursor: onClick ? "pointer" : "default",
-      background: `linear-gradient(160deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.1) 42%, rgba(255,255,255,0) 60%, rgba(22,48,95,0.10) 100%), rgba(${bg},0.78)`,
-      backdropFilter: "blur(12px) saturate(1.5)", WebkitBackdropFilter: "blur(12px) saturate(1.5)",
-      borderRadius: 14, border: "1px solid rgba(255,255,255,0.6)", padding: "9px 10px",
+      background: `linear-gradient(165deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.4) 30%, rgba(255,255,255,0.08) 55%, rgba(${bg},0.16) 100%), rgba(${bg},0.32)`,
+      backdropFilter: "blur(16px) saturate(1.8)", WebkitBackdropFilter: "blur(16px) saturate(1.8)",
+      borderRadius: 20, border: "1px solid rgba(255,255,255,0.9)", padding: "9px 10px",
       boxShadow: [
-        "inset 0 2px 1px rgba(255,255,255,0.95)",          // hard specular lip on the top edge
-        "inset 2px 0 2px -1px rgba(255,255,255,0.5)",      // light catching the left edge
-        "inset 0 -14px 20px -12px rgba(22,48,95,0.55)",    // depth pooling at the bottom
-        "inset -3px 0 8px -4px rgba(22,48,95,0.25)",       // right-edge falloff
-        "0 10px 22px -6px rgba(12,28,60,0.5)",             // lifted off the board
-        "0 2px 5px rgba(22,48,95,0.25)",                   // contact shadow
+        "inset 0 1.5px 0 rgba(255,255,255,0.95)",           // crisp bevel lip, top
+        "inset 0 -1.5px 0 rgba(255,255,255,0.7)",           // bevel lip, bottom — a full rim, not just top-lit
+        "inset 1.5px 0 0 rgba(255,255,255,0.55)",           // left edge catch
+        "inset -1.5px 0 0 rgba(255,255,255,0.35)",          // right edge falloff
+        "inset 0 9px 14px -6px rgba(255,255,255,0.75)",     // glass thickness — soft body highlight below the lip
+        "inset 0 -14px 20px -13px rgba(120,155,210,0.35)",  // faint blue pooling low in the glass
+        "0 12px 24px -9px rgba(90,130,190,0.32)",           // airy lifted shadow
+        "0 3px 7px rgba(90,130,190,0.16)",                  // contact shadow
       ].join(", "),
     }}>
-      {/* Curved glare — the big window reflection across the top of the bubble */}
-      <div aria-hidden style={{ position: "absolute", left: "-12%", right: "28%", top: "-58%", height: "100%", borderRadius: "50%",
-        background: "linear-gradient(175deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.28) 60%, rgba(255,255,255,0) 100%)", pointerEvents: "none" }} />
+      {/* Soft diffuse highlight — a rounder, gentler sheen than a hard specular streak */}
+      <div aria-hidden style={{ position: "absolute", left: "-16%", right: "22%", top: "-62%", height: "105%", borderRadius: "50%",
+        background: "radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.35) 55%, rgba(255,255,255,0) 100%)", pointerEvents: "none" }} />
       {icon && (
         <div aria-hidden style={{ position: "absolute", right: 7, bottom: 5, opacity: 0.35, filter: "drop-shadow(0 1px 1px rgba(255,255,255,0.6))" }}>
           <MenuIcon name={icon} size={30} color="#3B5BA5" />

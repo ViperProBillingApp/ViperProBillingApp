@@ -14,12 +14,19 @@ import UsersAdmin from "./users-admin.jsx";
  * ================================================================== */
 
 /* ------------------------------ Axes ------------------------------ */
+// Keys of a { key: { label } } map sorted by label — for dropdown options.
+// Kept separate from the maps themselves because some of those maps (STAGES,
+// via STAGE_ORDER) also drive things where the ORIGINAL order is meaningful:
+// the Workflow board's kanban columns and the Reports funnel breakdown.
+const alphaKeys = (obj) => Object.keys(obj).sort((a, b) => obj[a].label.localeCompare(obj[b].label));
+
 const SEGMENTS = {
   "viper-current": { label: "Viper Customer", color: "#0E766E" },
   "viper-past": { label: "Past Viper Customer", color: "#8A94A6" },
   "viper-maritz": { label: "Viper & Maritz Customer", color: "#7A5AA6" }, // Viper customer with free Maritz portal — only viper pricing applies
   "maritz-portal": { label: "Maritz - Viper Portal", color: "#3B5BA5" },
 };
+const SEGMENTS_ALPHA = alphaKeys(SEGMENTS);
 const BILLING = {
   "current-pricing": { label: "Up to date · current pricing", color: C.green, bg: C.greenBg },
   "old-pricing": { label: "Up to date · old pricing", color: C.amber, bg: C.amberBg },
@@ -32,6 +39,7 @@ const BILLING = {
   // send log. Only the label Darryl sees changed.
   "marked-deletion": { label: "Marked for Suspension", color: C.grey, bg: C.greyBg },
 };
+const BILLING_ALPHA = alphaKeys(BILLING);
 const STAGES = {
   "not-contacted": { label: "Not contacted", color: "#8A94A6", order: 0 },
   "need-to-contact": { label: "Need to contact", color: C.amber, order: 1 },
@@ -41,7 +49,11 @@ const STAGES = {
   "on-hold": { label: "On hold", color: "#7A4FB5", order: 4 },
   "marked-deletion": { label: "Marked for Suspension", color: C.red, order: 5 },
 };
+// Business/funnel order — drives the Workflow board's kanban columns and the
+// Reports breakdown, where reading top-to-bottom in that order is the point.
+// Dropdowns use STAGES_ALPHA below instead.
 const STAGE_ORDER = Object.keys(STAGES).sort((a, b) => STAGES[a].order - STAGES[b].order);
+const STAGES_ALPHA = alphaKeys(STAGES);
 // Tasks board (Workflow tab): lanes, category labels, and the account-edit flag
 // that also shows on client cards (mirrors the red/green Maritz-edit workflow).
 const TASK_LANES = [["todo", "To do"], ["doing", "In progress"], ["waiting", "Waiting on"], ["done", "Done"]];
@@ -52,11 +64,21 @@ const TASK_LABELS = {
   outreach: { label: "Custom outreach", fg: C.amber, bg: C.amberBg },
   onboarding: { label: "Onboarding", fg: C.green, bg: C.greenBg },
 };
+const TASK_LABELS_ALPHA = alphaKeys(TASK_LABELS);
 const CLIENT_FLAGS = {
   approved: { label: "Approved", fg: C.green, bg: C.greenBg },
   edit: { label: "Needs edit", fg: C.amber, bg: C.amberBg },
   remove: { label: "Remove", fg: C.red, bg: C.redBg },
 };
+const CLIENT_FLAGS_ALPHA = alphaKeys(CLIENT_FLAGS);
+// Staff list sorted by display name, for owner/assignee dropdowns.
+const staffAlpha = (staff) => [...staff].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+// Email template picker, sorted by label — `templates` is runtime (settings +
+// custom additions), so this sorts at the point of use rather than at a fixed
+// key list. Not used for the Audience selector, which is a curated action menu
+// (Suggested / Campaigns / billing shortcuts / group presets), not a category
+// list — alphabetizing it would break that deliberate ordering.
+const templateOptionsAlpha = (templates) => Object.entries(templates).sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([k, v]) => [k, v.label]);
 const initialsOf = (s) => {
   const t = (s || "").trim();
   if (!t) return "?";
@@ -1198,10 +1220,10 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: `1px solid ${C.lineSoft}` }}>
           <span style={{ fontSize: 12, fontWeight: 600, color: subC }}>Billing status</span>
           <MiniSelect value={client.billingStatus} onChange={(v) => onUpdateWithLog(client.id, { billingStatus: v }, "status", `Billing status → ${BILLING[v].label}`)}
-            options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
+            options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
           <span style={{ fontSize: 12, fontWeight: 600, color: subC, marginLeft: 6 }}>Workflow</span>
           <MiniSelect value={client.stage} onChange={(v) => onUpdateWithLog(client.id, { stage: v }, "stage", `Stage → ${STAGES[v].label}`)}
-            options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+            options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
         </div>
       )}
     </div>
@@ -1214,7 +1236,7 @@ function ComposeModal({ client, settings, templates, initialType, onClose, onLog
   const [type, setType] = useState(initialType || "reminder");
   return (
     <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall>
-      <Field label="Template"><MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} /></Field>
+      <Field label="Template"><MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} /></Field>
       <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} compact />
     </Modal>
   );
@@ -1574,7 +1596,7 @@ function EmailIconMenu({ client, templates, onPick, light }) {
         <>
           <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
           <div style={{ position: "fixed", top: menu.top, right: menu.right, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, minWidth: 190, overflow: "hidden" }}>
-            {Object.entries(templates).map(([k, v]) => (
+            {Object.entries(templates).sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([k, v]) => (
               <button key={k} onClick={() => { onPick(k); setMenu(null); }}
                 style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", fontSize: 12.5, fontWeight: 500, background: "none", border: "none", cursor: "pointer", color: C.ink }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
@@ -1632,13 +1654,13 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
         <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
           title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
-          {Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          {BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}
         </select>
       </div>
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
         <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
           title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
-          {STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
+          {STAGES_ALPHA.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
         </select>
       </div>
       <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
@@ -1751,9 +1773,9 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
       <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
         {/* Same Trello-blue gradient as the Workflow board */}
         <div style={{ padding: "10px 16px", background: C.boardGradient, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
-          <HeaderFilter label="Client" values={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+          <HeaderFilter label="Client" values={seg} onChange={setSeg} options={SEGMENTS_ALPHA.map((k) => [k, SEGMENTS[k].label])} />
+          <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
+          <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="In ChargeOver" values={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Maritz Portal" values={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
           <HeaderFilter label="Viper Customer" values={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"], ["past", "Past Viper Customer"]]} />
@@ -1878,7 +1900,7 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
                     {!showHidden && (
                       <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
                         style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 6px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.sub, cursor: "pointer" }}>
-                        {STAGE_ORDER.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
+                        {STAGES_ALPHA.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
                       </select>
                     )}
                     {/* Assign staff straight from the card, same control as task cards */}
@@ -2007,7 +2029,7 @@ function AssignButton({ owner, staff, staffByEmail, onAssign, size = 18 }) {
         <>
           <div onClick={(e) => { e.stopPropagation(); setMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
           <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: menu.top, right: menu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
-            {staff.map((s) => (
+            {staffAlpha(staff).map((s) => (
               <button key={s.email} onClick={() => { onAssign(s.email); setMenu(null); }}
                 style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
                 <Avatar email={s.email} staffByEmail={staffByEmail} size={18} />{s.name || s.email}
@@ -2089,13 +2111,13 @@ function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
         <Field label="Owner">
           <select style={inputStyle} value={owner} onChange={(e) => setOwner(e.target.value)}>
             <option value="">Unassigned</option>
-            {staff.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+            {staffAlpha(staff).map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
           </select>
         </Field>
         <Field label="Label">
           <select style={inputStyle} value={label} onChange={(e) => setLabel(e.target.value)}>
             <option value="">None</option>
-            {Object.entries(TASK_LABELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            {TASK_LABELS_ALPHA.map((k) => <option key={k} value={k}>{TASK_LABELS[k].label}</option>)}
           </select>
         </Field>
         <Field label="Due date"><input type="date" style={inputStyle} value={due} onChange={(e) => setDue(e.target.value)} /></Field>
@@ -2657,7 +2679,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         {camp && curRound ? (
           <MiniPill fg={C.action} bg="#E7EDF8">Round {camp.rounds.length} · {curRound.label} · {templates[curRound.type]?.label || curRound.type}</MiniPill>
         ) : (
-          <MiniSelect value={type} onChange={setType} options={Object.entries(templates).map(([k, v]) => [k, v.label])} />
+          <MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} />
         )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
           style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
@@ -2809,7 +2831,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
             </Field>
             <Field label="First letter template">
               <select style={inputStyle} value={tpl} onChange={(e) => setTpl(e.target.value)}>
-                {Object.entries(templates).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                {templateOptionsAlpha(templates).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </Field>
           </div>
@@ -2860,7 +2882,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
               <div className="flex items-center" style={{ gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                 <input style={{ ...inputStyle, width: 200 }} value={roundLabel} onChange={(e) => setRoundLabel(e.target.value)} placeholder="Round label" />
                 <select style={{ ...inputStyle, width: 200 }} value={roundTpl} onChange={(e) => setRoundTpl(e.target.value)}>
-                  {Object.entries(templates).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  {templateOptionsAlpha(templates).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                 </select>
                 <MiniBtn solid onClick={() => addRound(cp)}>Start round {cp.rounds.length + 1}</MiniBtn>
                 <MiniBtn onClick={() => setRoundFor(null)}>Cancel</MiniBtn>
@@ -3132,7 +3154,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
               <select value={client.segment} onChange={(e) => set({ segment: e.target.value })} title="Segment"
                 style={{ fontSize: 12, fontWeight: 600, color: "#fff", background: "transparent", border: "none", cursor: "pointer", outline: "none", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlign: "right" }}>
-                {Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k} style={{ color: C.ink }}>{v.label}</option>)}
+                {SEGMENTS_ALPHA.map((k) => <option key={k} value={k} style={{ color: C.ink }}>{SEGMENTS[k].label}</option>)}
               </select>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.85)", pointerEvents: "none" }}>▾</span>
             </span>
@@ -3159,22 +3181,22 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Field label="Owner">
               <CompactSelect value={client.owner || ""} onChange={(e) => set({ owner: e.target.value })}>
                 <option value="">Unassigned</option>
-                {staff.map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+                {staffAlpha(staff).map((s) => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
               </CompactSelect>
             </Field>
             <Field label="Flag">
               <CompactSelect value={client.flag || ""} onChange={(e) => set({ flag: e.target.value })}>
                 <option value="">None</option>
-                {Object.entries(CLIENT_FLAGS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                {CLIENT_FLAGS_ALPHA.map((k) => <option key={k} value={k}>{CLIENT_FLAGS[k].label}</option>)}
               </CompactSelect>
             </Field>
             <Field label="Email status">
               <CompactSelect value={client.emailStatus} onChange={(e) => set({ emailStatus: e.target.value })}>
-                <option value="ok">Deliverable</option><option value="bounced">Bounced</option><option value="undelivered">Undelivered</option>
+                <option value="bounced">Bounced</option><option value="ok">Deliverable</option><option value="undelivered">Undelivered</option>
               </CompactSelect>
             </Field>
-            <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</CompactSelect></Field>
-            <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGE_ORDER.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
+            <Field label="Billing status (ChargeOver)"><CompactSelect value={client.billingStatus} onChange={(e) => set({ billingStatus: e.target.value })}>{BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}</CompactSelect></Field>
+            <Field label="Workflow stage"><CompactSelect value={client.stage} onChange={(e) => onUpdateWithLog(client.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}>{STAGES_ALPHA.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}</CompactSelect></Field>
             <Field label={client.website ? <span>Website · <a href={/^https?:\/\//.test(client.website) ? client.website : `https://${client.website}`} target="_blank" rel="noreferrer" style={{ color: C.action }}>open ↗</a></span> : "Website"}>
               <input style={inputStyle} value={client.website || ""} onChange={(e) => set({ website: e.target.value })} placeholder="company.com" />
             </Field>
@@ -3289,14 +3311,14 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             ) : (
               <Field label="Currency">
                 <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
-                  <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+                  <option value="">Default ({settings.currency})</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option>
                 </CompactSelect>
               </Field>
             )}
             {client.multiOffice && (
               <Field label="Currency">
                 <CompactSelect value={client.currency || ""} onChange={(e) => set({ currency: e.target.value })}>
-                  <option value="">Default ({settings.currency})</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option>
+                  <option value="">Default ({settings.currency})</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option>
                 </CompactSelect>
               </Field>
             )}
@@ -4342,10 +4364,10 @@ function AddPanel({ onAdd }) {
         <Field label="Amount"><input type="number" style={inputStyle} value={f.amount} onChange={set("amount")} /></Field>
         <Field label="Billing day"><input type="number" min="1" max="28" style={inputStyle} value={f.billingDay} onChange={set("billingDay")} /></Field>
         <Field label="Cadence"><select style={inputStyle} value={f.cadence} onChange={set("cadence")}>{Object.entries(CADENCE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
-        <Field label="Currency"><select style={inputStyle} value={f.currency} onChange={set("currency")}><option value="">Default</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option></select></Field>
+        <Field label="Currency"><select style={inputStyle} value={f.currency} onChange={set("currency")}><option value="">Default</option><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option></select></Field>
       </div>
-      <Field label="Segment"><select style={inputStyle} value={f.segment} onChange={set("segment")}>{Object.entries(SEGMENTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
-      <Field label="Billing status"><select style={inputStyle} value={f.billingStatus} onChange={set("billingStatus")}>{Object.entries(BILLING).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}</select></Field>
+      <Field label="Segment"><select style={inputStyle} value={f.segment} onChange={set("segment")}>{SEGMENTS_ALPHA.map((k) => <option key={k} value={k}>{SEGMENTS[k].label}</option>)}</select></Field>
+      <Field label="Billing status"><select style={inputStyle} value={f.billingStatus} onChange={set("billingStatus")}>{BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}</select></Field>
       <div style={{ margin: "14px 0" }}><ToggleSwitch checked={f.inChargeOver} onChange={(v) => setF({ ...f, inChargeOver: v })} label="Already in ChargeOver" /></div>
       <div className="flex justify-end" style={{ marginTop: 8 }}><SolidBtn onClick={() => onAdd(f)}>Add client</SolidBtn></div>
     </div>
@@ -4357,7 +4379,7 @@ function SettingsPanel({ settings, onSave }) {
     <div>
       <Field label="Business name"><input style={inputStyle} value={s.businessName} onChange={set("businessName")} /></Field>
       <Field label="Sender name"><input style={inputStyle} value={s.senderName} onChange={set("senderName")} /></Field>
-      <Field label="Default currency"><select style={inputStyle} value={s.currency} onChange={set("currency")}><option value="GBP">£ GBP</option><option value="USD">$ USD</option><option value="EUR">€ EUR</option></select></Field>
+      <Field label="Default currency"><select style={inputStyle} value={s.currency} onChange={set("currency")}><option value="EUR">€ EUR</option><option value="GBP">£ GBP</option><option value="USD">$ USD</option></select></Field>
       <div className="flex justify-end" style={{ marginTop: 8 }}><SolidBtn onClick={() => onSave(s)}>Save</SolidBtn></div>
     </div>
   );

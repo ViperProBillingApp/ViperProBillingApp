@@ -1288,18 +1288,22 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onCl
       {/* Soft diffuse highlight — a rounder, gentler sheen than a hard specular streak */}
       <div aria-hidden style={{ position: "absolute", left: "-16%", right: "22%", top: "-62%", height: "105%", borderRadius: "50%",
         background: "radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.35) 55%, rgba(255,255,255,0) 100%)", pointerEvents: "none" }} />
+      {/* Icon and value/sub are white — the tile floats on the dark board
+          gradient, and backdrop-blur pulls that dark blue through most of
+          the glass (only the top-left sheen is actually light), so the
+          dark ink these used to inherit read as near-invisible there. */}
       {icon && (
-        <div aria-hidden style={{ position: "absolute", right: 7, bottom: 5, opacity: 0.35, filter: "drop-shadow(0 1px 1px rgba(255,255,255,0.6))" }}>
-          <MenuIcon name={icon} size={30} color="#3B5BA5" />
+        <div aria-hidden style={{ position: "absolute", right: 7, bottom: 5, opacity: 0.55, filter: "drop-shadow(0 1px 2px rgba(20,40,80,0.35))" }}>
+          <MenuIcon name={icon} size={30} color="#fff" />
         </div>
       )}
       <div style={{ position: "relative", paddingRight: 36 }}>
         <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
           <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0, boxShadow: "0 1px 2px rgba(22,48,95,0.4), inset 0 -1px 1px rgba(0,0,0,0.15)" }} />
-          <span style={{ fontSize: 9, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
+          <span style={{ fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
         </div>
-        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, textShadow: "0 1px 0 rgba(255,255,255,0.7)" }}>{value}</div>
-        <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
+        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, color: "#fff", textShadow: "0 1px 2px rgba(20,40,80,0.4)" }}>{value}</div>
+        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.88)", marginTop: 1, textShadow: "0 1px 2px rgba(20,40,80,0.3)" }}>{sub}</div>
       </div>
     </Tag>
   );

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { writeAudit } from "../../../../lib/security.js";
-import { mirrorClients, mergeClientSecrets, encryptClients } from "../../../../lib/clients.js";
+import { mirrorClients, mergeClientSecrets, encryptClients, diffClientChanges } from "../../../../lib/clients.js";
 
 // F-08 Phase 2: per-client-diff save. The client sends only the clients it
 // CHANGED (upserts) and REMOVED (deletes) — never the whole array — so a stale
@@ -35,6 +35,9 @@ export async function PUT(req) {
   // Merge the diff into current server clients, preserving order.
   // F-01: keep stored secrets when the incoming (stripped) client has them blank.
   const map = new Map((state.clients || []).map((c) => [c.id, c]));
+  // Snapshot pre-merge so the audit entry below can diff what changed — taken
+  // BEFORE map.set overwrites it, same reason `removed` is snapshotted before delete.
+  const beforeById = new Map(upserts.map((c) => [c.id, map.get(c.id)]));
   for (const c of upserts) map.set(c.id, mergeClientSecrets(map.get(c.id), c));
   const removed = deletes.map((id) => map.get(id)).filter(Boolean); // snapshot before dropping
   for (const id of deletes) map.delete(id);
@@ -71,5 +74,27 @@ export async function PUT(req) {
   if (deletes.length >= 5) {
     await writeAudit({ actorId: user.id, actorEmail: user.email, action: "clients.bulk_delete", detail: `${deletes.length} deleted (rev ${nextRev})`, req });
   }
+
+  // F-03: every OTHER route on this audit trail logs admin/security actions
+  // (login, user mgmt, secrets reveal, recycle-bin restore/purge) — but this is
+  // the one route behind every ordinary client-card save, and until now it only
+  // wrote to audit_log for deletes ≥5. A billing-status change, a pricing edit,
+  // or a NEW PORTAL PASSWORD went nowhere but the client's own mutable
+  // `activity` array — exactly the architecture the original finding
+  // criticized. One row per save fixes that. Only key NAMES are logged, never
+  // values, so a secret write shows as "portalPassword changed", not the secret.
+  const newById = new Map(newClients.map((n) => [n.id, n])); // read the value actually persisted, not a second encryption pass
+  const changed = diffClientChanges(upserts, beforeById, newById);
+  if (changed.length || removed.length) {
+    await writeAudit({
+      actorId: user.id, actorEmail: user.email, action: "clients.saved",
+      detail: {
+        changed,
+        deleted: removed.map((c) => ({ id: c.id, company: c.company || c.name || "" })),
+      },
+      req,
+    });
+  }
+
   return NextResponse.json({ ok: true, rev: nextRev });
 }

@@ -745,7 +745,7 @@ export default function CRM({ user }) {
     // so the glass panes' backdrop blur has something to refract as you scroll.
     <div className="crm-root" style={{
       backgroundColor: C.paper,
-      backgroundImage: "linear-gradient(rgba(255,255,255,0.55), rgba(255,255,255,0.55)), url(/page-bg.jpg)",
+      backgroundImage: "linear-gradient(rgba(255,255,255,0.6), rgba(255,255,255,0.6)), url(/page-bg.jpg)",
       backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed",
       minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
       {/* Phone-only top bar: wordmark + hamburger. Hidden on desktop (globals.css).

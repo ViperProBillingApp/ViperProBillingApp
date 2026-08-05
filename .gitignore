@@ -5,3 +5,13 @@ data/
 .DS_Store
 .vercel
 .env*
+
+# Generated reports and exported client lists. These hold real names, emails
+# and billing detail; the database is the source of truth and git history is
+# permanent, so they stay out of it. Regenerate rather than commit.
+/Client chase worksheet.pdf
+/Maritz customer lists.*
+/scratch-*
+*.csv
+*.xlsx
+*.docx

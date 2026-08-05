@@ -1502,27 +1502,55 @@ function Funnel({ color }) {
   return <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden><path d="M3 5h18l-7 8v5l-4 2v-7z" fill={color} /></svg>;
 }
 // A column heading that IS a filter dropdown. Shows a funnel + turns accent-coloured when active.
-function HeaderFilter({ label, value, onChange, options, align = "left" }) {
-  const active = value !== "all";
+// Column header: the label is just a label, with a funnel button beside it that
+// opens a checkbox list. `values` is an array — tick several and the column
+// matches any of them, so you can ask for "Maritz OR Viper & Maritz" in one go.
+// Portalled to <body> like EmailIconMenu: the table clips overflow, so an
+// absolutely-positioned panel would be cut off by the first row.
+function HeaderFilter({ label, values, onChange, options, align = "left" }) {
+  const [menu, setMenu] = useState(null); // null | {top, left}
+  const active = values.length > 0;
   const justify = align === "right" ? "flex-end" : align === "center" ? "center" : "flex-start";
+  const PANEL = 226;
+  const toggle = (e) => {
+    if (menu) { setMenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    // Keep the panel on screen for the right-hand columns.
+    setMenu({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left - 8, window.innerWidth - PANEL - 8)) });
+  };
+  const flip = (k) => onChange(values.includes(k) ? values.filter((v) => v !== k) : [...values, k]);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0, justifyContent: justify,
-      // active filter gets a soft pill so a filtered column reads at a glance
-      background: active ? "rgba(255,255,255,0.16)" : "transparent", borderRadius: 6, padding: "2px 6px", margin: "-2px -6px" }}>
-      {active && (
-        <button onClick={() => onChange("all")} title="Clear this filter" style={{ background: "none", border: "none", padding: 7, margin: -7, cursor: "pointer", display: "flex" }}>
-          <Funnel color="#fff" />
-        </button>
+    <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0, justifyContent: justify }}>
+      <span style={{ fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: active ? 700 : 600,
+        color: active ? "#fff" : "rgba(255,255,255,0.82)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <button onClick={toggle} title={active ? `${label}: ${values.length} selected` : `Filter by ${label}`} aria-label={`Filter by ${label}`}
+        style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, cursor: "pointer", border: "none",
+          padding: "3px 5px", borderRadius: 6, background: active ? "rgba(255,255,255,0.24)" : "transparent" }}>
+        <Funnel color={active ? "#fff" : "rgba(255,255,255,0.55)"} />
+        {values.length > 1 && <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: MONO }}>{values.length}</span>}
+      </button>
+      {menu && createPortal(
+        <>
+          <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
+          <div style={{ position: "fixed", top: menu.top, left: menu.left, width: PANEL, background: C.panel, border: `1px solid ${C.line}`,
+            borderRadius: 10, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, overflow: "hidden" }}>
+            <div className="flex items-center justify-between" style={{ padding: "8px 12px", borderBottom: `1px solid ${C.lineSoft}`, gap: 8 }}>
+              <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: C.faint, fontWeight: 700 }}>{label}</span>
+              {active && <button onClick={() => onChange([])} style={{ fontSize: 11, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>Clear</button>}
+            </div>
+            <div style={{ maxHeight: 260, overflowY: "auto", padding: "4px 0" }}>
+              {options.map(([k, l]) => (
+                <label key={k} className="flex items-center" style={{ gap: 8, padding: "6px 12px", fontSize: 12.5, cursor: "pointer", color: C.ink }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                  <input type="checkbox" checked={values.includes(k)} onChange={() => flip(k)} style={{ cursor: "pointer", flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        </>,
+        document.body
       )}
-      {/* header row sits on the workflow-blue gradient — white text, brighter when a filter is active */}
-      <select value={value} onChange={(e) => onChange(e.target.value)} title="Filter this column"
-        style={{ maxWidth: "100%", fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: active ? 700 : 600,
-          color: active ? "#fff" : "rgba(255,255,255,0.82)", background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: 0,
-          appearance: "none", WebkitAppearance: "none", MozAppearance: "none", textAlignLast: align === "right" ? "right" : align === "center" ? "center" : "left" }}>
-        <option value="all" style={{ color: C.ink }}>{label}</option>
-        {options.map(([k, l]) => <option key={k} value={k} style={{ color: C.ink }}>{l}</option>)}
-      </select>
-      <span style={{ fontSize: 10, color: active ? "#fff" : "rgba(255,255,255,0.82)", pointerEvents: "none" }}>▾</span>
     </div>
   );
 }
@@ -1637,20 +1665,51 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
   );
 });
 
+// Removable filter chip. One component for the metric drill-down and every
+// column filter, so what's narrowing the list reads in a single line instead of
+// hiding inside eight dropdowns.
+function Chip({ label, onClear }) {
+  return (
+    <button onClick={onClear} title={`Remove: ${label}`} className="flex items-center"
+      style={{ gap: 6, background: C.boardGradient, color: "#fff", border: "none", borderRadius: 20,
+        padding: "4px 8px 4px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", maxWidth: 260 }}>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        width: 15, height: 15, borderRadius: "50%", background: "rgba(255,255,255,0.25)", fontSize: 11, lineHeight: 1 }}>×</span>
+    </button>
+  );
+}
+
 function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
-  const [seg, setSeg] = useState("all");
-  const [bill, setBill] = useState("all");
-  const [stage, setStage] = useState("all");
-  const [co, setCo] = useState("all");
-  const [mp, setMp] = useState("all");
-  const [vc, setVc] = useState("all");
-  const [owed, setOwed] = useState("all");
+  // Each column filter is a list of accepted values; empty means "no filter".
+  const [seg, setSeg] = useState([]);
+  const [bill, setBill] = useState([]);
+  const [stage, setStage] = useState([]);
+  const [co, setCo] = useState([]);
+  const [mp, setMp] = useState([]);
+  const [vc, setVc] = useState([]);
+  const [owed, setOwed] = useState([]);
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
-  const activeCount = [seg, bill, stage, co, mp, vc, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
-  const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setMp("all"); setVc("all"); setOwed("all"); setQ(""); };
+  const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setMp([]); setVc([]); setOwed([]); setQ(""); onClearFocus?.(); };
+  const YN = (v) => (v === "yes" ? "Yes" : "No");
+  // One chip per selected value, so a grouped filter reads as its parts.
+  const chipsFor = (arr, set, labelOf, prefix) =>
+    arr.map((v) => ({ key: `${prefix}:${v}`, label: labelOf(v), clear: () => set(arr.filter((x) => x !== v)) }));
   const foc = focus ? STAT_FOCUS[focus] : null;
+  // Everything currently narrowing the list, in the order the header reads.
+  const chips = [
+    ...(foc ? [{ key: "focus", label: foc.label, clear: onClearFocus }] : []),
+    ...chipsFor(seg, setSeg, (v) => SEGMENTS[v]?.label || v, "seg"),
+    ...chipsFor(bill, setBill, (v) => BILLING[v]?.label || v, "bill"),
+    ...chipsFor(stage, setStage, (v) => STAGES[v]?.label || v, "stage"),
+    ...chipsFor(co, setCo, (v) => `In ChargeOver: ${YN(v)}`, "co"),
+    ...chipsFor(mp, setMp, (v) => `Maritz Portal: ${YN(v)}`, "mp"),
+    ...chipsFor(vc, setVc, (v) => `Viper Customer: ${v === "past" ? "Past" : YN(v)}`, "vc"),
+    ...chipsFor(owed, setOwed, (v) => (v === "overdue" ? "Overdue" : "Up to date"), "owed"),
+    ...(q.trim() ? [{ key: "q", label: `Search: “${q.trim()}”`, clear: () => setQ("") }] : []),
+  ];
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     // Offices covered by a group card stay off the main list — the group card
@@ -1659,13 +1718,14 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     // against the number on the tile the user just clicked.
     if (foc) l = l.filter(foc.test);
     else l = l.filter((c) => (showOffices ? c.multiOffice && !c.groupBillingMaster : !coveredByGroup(c)));
-    if (seg !== "all") l = l.filter((c) => c.segment === seg);
-    if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
-    if (stage !== "all") l = l.filter((c) => c.stage === stage);
-    if (co !== "all") l = l.filter((c) => (co === "yes" ? !!c.inChargeOver : !c.inChargeOver));
-    if (mp !== "all") l = l.filter((c) => (mp === "yes" ? !!c.maritzPortal : !c.maritzPortal));
-    if (vc !== "all") l = l.filter((c) => (vc === "past" ? c.segment === "viper-past" : vc === "yes" ? !!c.viperCustomer : !c.viperCustomer));
-    if (owed !== "all") l = l.filter((c) => (owed === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0));
+    // Within a column the selected values are OR'd; across columns they're AND'd.
+    if (seg.length) l = l.filter((c) => seg.includes(c.segment));
+    if (bill.length) l = l.filter((c) => bill.includes(c.billingStatus));
+    if (stage.length) l = l.filter((c) => stage.includes(c.stage));
+    if (co.length) l = l.filter((c) => co.includes(c.inChargeOver ? "yes" : "no"));
+    if (mp.length) l = l.filter((c) => mp.includes(c.maritzPortal ? "yes" : "no"));
+    if (vc.length) l = l.filter((c) => vc.some((v) => (v === "past" ? c.segment === "viper-past" : v === "yes" ? !!c.viperCustomer : !c.viperCustomer)));
+    if (owed.length) l = l.filter((c) => owed.some((v) => (v === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0)));
     if (q.trim()) {
       const k = q.toLowerCase();
       l = l.filter((c) =>
@@ -1680,19 +1740,9 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
-        <span style={{ fontSize: 12.5, color: C.sub }}>
-          {list.length} of {totalActive}
-          {activeCount > 0 && <span style={{ color: C.action, fontWeight: 600 }}> · {activeCount} filter{activeCount > 1 ? "s" : ""} active</span>}
-        </span>
-        {/* Drill-down chip — click to drop back to the full list */}
-        {foc && (
-          <button onClick={onClearFocus} title="Show all clients again" className="flex items-center"
-            style={{ gap: 6, background: C.boardGradient, color: "#fff", border: "none", borderRadius: 20, padding: "4px 8px 4px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
-            {foc.label}
-            <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(255,255,255,0.25)", fontSize: 11, lineHeight: 1 }}>×</span>
-          </button>
-        )}
-        {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
+        <span style={{ fontSize: 12.5, color: C.sub }}>{list.length} of {totalActive}</span>
+        {chips.map((f) => <Chip key={f.key} label={f.label} onClear={f.clear} />)}
+        {chips.length > 1 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear all</button>}
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived
         </label>
@@ -1705,13 +1755,13 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
       <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
         {/* Same Trello-blue gradient as the Workflow board */}
         <div style={{ padding: "10px 16px", background: C.boardGradient, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
-          <HeaderFilter label="Client" value={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Billing" value={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
-          <HeaderFilter label="Stage" value={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
-          <HeaderFilter label="In ChargeOver" value={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Maritz Portal" value={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Viper Customer" value={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"], ["past", "Past Viper Customer"]]} />
-          <HeaderFilter label="Owed / rate" value={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
+          <HeaderFilter label="Client" values={seg} onChange={setSeg} options={Object.entries(SEGMENTS).map(([k, v]) => [k, v.label])} />
+          <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={Object.entries(BILLING).map(([k, v]) => [k, v.label])} />
+          <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGE_ORDER.map((k) => [k, STAGES[k].label])} />
+          <HeaderFilter label="In ChargeOver" values={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Maritz Portal" values={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Viper Customer" values={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"], ["past", "Past Viper Customer"]]} />
+          <HeaderFilter label="Owed / rate" values={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>
         {list.map((c) => (

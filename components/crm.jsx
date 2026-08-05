@@ -760,27 +760,14 @@ export default function CRM({ user }) {
         </button>
       </div>
       {/* Left navigation panel — hidden behind the hamburger under 768px (see globals.css) */}
-      {/* Bottom-up board-blue wash sits as the TOP background layer, fading to transparent by ~180px so the light menu shows through above it */}
-      {/* Left menu as a 3D glass pane: the existing photo/gradient stack sits
-          under a curved specular sweep, a hard top lip, edge lighting and a
-          deep lifted shadow — same liquid-glass language as the tabs. */}
+      {/* No surface of its own: no photo, no glass, no shadow. The page
+          background reads straight through and the items sit directly on it. */}
       <aside className={`crm-aside${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen(false)}
-        style={{ width: 194, flexShrink: 0, backgroundColor: C.panel,
-        backgroundImage: "linear-gradient(115deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.18) 22%, rgba(255,255,255,0) 45%), linear-gradient(to top, rgba(22,48,95,0.96) 0%, rgba(29,69,134,0.8) 80px, rgba(42,98,184,0) 180px), linear-gradient(to bottom, rgba(255,255,255,1) 0%, rgba(255,255,255,1) 45%, rgba(255,255,255,0) 90%), linear-gradient(rgba(255,255,255,0.82), rgba(255,255,255,0.82)), url(/menu-bg.jpg)",
-        backgroundSize: "cover", backgroundPosition: "center",
-        border: "1px solid rgba(255,255,255,0.6)", borderRadius: 16, overflow: "hidden",
-        boxShadow: [
-          "inset 0 2px 1px rgba(255,255,255,0.95)",        // specular lip along the top
-          "inset -2px 0 2px -1px rgba(255,255,255,0.55)",  // light catching the rounded right edge
-          "inset 0 -18px 26px -14px rgba(12,28,60,0.55)",  // depth pooling at the bottom
-          "inset -6px 0 14px -8px rgba(22,48,95,0.28)",    // inner falloff toward the edge
-          "6px 4px 22px -4px rgba(12,28,60,0.4)",          // lifted off the page
-          "2px 2px 6px rgba(22,48,95,0.18)",               // contact shadow
-        ].join(", "),
+        style={{ width: 194, flexShrink: 0,
         padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3,
-        // floats clear of the page edges so the background shows around it,
-        // vertically centred and staying put as you scroll
-        position: "sticky", top: 14, height: "calc(100vh - 28px)", margin: "14px 0 14px 10px" }}>
+        // stays put as you scroll; scrolls itself if the viewport is too short
+        position: "sticky", top: 14, height: "calc(100vh - 28px)", overflowY: "auto",
+        margin: "14px 0 14px 10px" }}>
         <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
         <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
         <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
@@ -792,9 +779,10 @@ export default function CRM({ user }) {
         <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
         {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
         <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
-        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.3)" }}>
-          <div style={{ fontSize: 12, color: "#fff", padding: "0 6px 6px" }}>{user.name || user.email}</div>
-          <MenuItem icon="signout" onClick={logout} light>Sign out</MenuItem>
+        {/* The blue wash this used to sit on is gone — dark text, faint rule */}
+        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+          <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
+          <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
         </div>
       </aside>
 
@@ -936,16 +924,15 @@ function MenuIcon({ name, color, size = 21 }) {
   }
 }
 // Left-panel menu button
-function MenuItem({ onClick, active, icon, children, light }) {
-  // light: sits on the aside's bottom blue wash — white text/icon, translucent hover
+function MenuItem({ onClick, active, icon, children }) {
   return (
     <button
       onClick={onClick}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = light ? "rgba(255,255,255,0.16)" : C.lineSoft; }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.lineSoft; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
-      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: light ? "#fff" : active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
     >
-      {icon && <MenuIcon name={icon} color={light ? "#fff" : C.action} />}
+      {icon && <MenuIcon name={icon} color={C.action} />}
       {/* Multi-word labels break at the first space so every item is at most two
           lines on the desktop rail; the phone sheet flattens the break back to a
           space via .crm-menu-gap (globals.css) */}

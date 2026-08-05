@@ -71,6 +71,29 @@ const CLIENT_FLAGS = {
   remove: { label: "Remove", fg: C.red, bg: C.redBg },
 };
 const CLIENT_FLAGS_ALPHA = alphaKeys(CLIENT_FLAGS);
+// Combines the two independent maritzPortal/viperCustomer booleans into one
+// "Customer" column on the Clients grid — both flags still exist on the
+// client record (used elsewhere: the Emails audience picker, ViperCustomers
+// sync), this only changes how they're shown/edited/filtered together.
+// Order is fixed, not alphabetical (Darryl's call, not the general "sort
+// dropdowns alpha" convention) — colors match the equivalent Client/segment
+// badges (viper-current/viper-maritz/maritz-portal) for at-a-glance continuity.
+const CUSTOMER_KIND = {
+  maritz: { label: "Maritz Portal", color: "#3B5BA5" },
+  viper: { label: "Viper", color: "#0E766E" },
+  both: { label: "Maritz & Viper", color: "#7A5AA6" },
+  none: { label: "Neither", color: C.faint },
+};
+const CUSTOMER_ORDER = ["maritz", "viper", "both", "none"];
+function customerKindOf(c) { return c.maritzPortal && c.viperCustomer ? "both" : c.maritzPortal ? "maritz" : c.viperCustomer ? "viper" : "none"; }
+function customerKindPatch(kind) {
+  return {
+    maritz: { maritzPortal: true, viperCustomer: false },
+    viper: { maritzPortal: false, viperCustomer: true },
+    both: { maritzPortal: true, viperCustomer: true },
+    none: { maritzPortal: false, viperCustomer: false },
+  }[kind];
+}
 // Staff list sorted by display name, for owner/assignee dropdowns.
 const staffAlpha = (staff) => [...staff].sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
 // Email template picker, sorted by label — `templates` is runtime (settings +
@@ -1671,8 +1694,12 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
         </select>
       </div>
       <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
-      <BoolCell value={c.maritzPortal} onChange={(v) => onUpdate(c.id, { maritzPortal: v })} trueLabel="Maritz Portal" falseLabel="Not Maritz" title="Maritz Portal" />
-      <BoolCell value={c.viperCustomer} onChange={(v) => onUpdate(c.id, { viperCustomer: v })} trueLabel="Viper Customer" falseLabel="Not Viper" title="Viper Customer" />
+      <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+        <select value={customerKindOf(c)} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, customerKindPatch(e.target.value))}
+          title="Customer" style={{ fontSize: 12.5, fontWeight: 600, color: CUSTOMER_KIND[customerKindOf(c)].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
+          {CUSTOMER_ORDER.map((k) => <option key={k} value={k}>{CUSTOMER_KIND[k].label}</option>)}
+        </select>
+      </div>
       <div style={{ textAlign: "right" }}>
         {coveredByGroup(c)
           ? <div style={{ fontFamily: MONO, fontSize: 13, color: C.faint, fontWeight: 600 }} title="Billed via the group card">via group</div>
@@ -1711,13 +1738,12 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   const [bill, setBill] = useState([]);
   const [stage, setStage] = useState([]);
   const [co, setCo] = useState([]);
-  const [mp, setMp] = useState([]);
-  const [vc, setVc] = useState([]);
+  const [cust, setCust] = useState([]); // combined Maritz Portal / Viper / Maritz & Viper / Neither
   const [owed, setOwed] = useState([]);
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
-  const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setMp([]); setVc([]); setOwed([]); setQ(""); onClearFocus?.(); };
+  const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setCust([]); setOwed([]); setQ(""); onClearFocus?.(); };
   const YN = (v) => (v === "yes" ? "Yes" : "No");
   // One chip per selected value, so a grouped filter reads as its parts.
   const chipsFor = (arr, set, labelOf, prefix) =>
@@ -1730,8 +1756,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     ...chipsFor(bill, setBill, (v) => BILLING[v]?.label || v, "bill"),
     ...chipsFor(stage, setStage, (v) => STAGES[v]?.label || v, "stage"),
     ...chipsFor(co, setCo, (v) => `In ChargeOver: ${YN(v)}`, "co"),
-    ...chipsFor(mp, setMp, (v) => `Maritz Portal: ${YN(v)}`, "mp"),
-    ...chipsFor(vc, setVc, (v) => `Viper Customer: ${v === "past" ? "Past" : YN(v)}`, "vc"),
+    ...chipsFor(cust, setCust, (v) => CUSTOMER_KIND[v]?.label || v, "cust"),
     ...chipsFor(owed, setOwed, (v) => (v === "overdue" ? "Overdue" : "Up to date"), "owed"),
     ...(q.trim() ? [{ key: "q", label: `Search: “${q.trim()}”`, clear: () => setQ("") }] : []),
   ];
@@ -1748,8 +1773,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     if (bill.length) l = l.filter((c) => bill.includes(c.billingStatus));
     if (stage.length) l = l.filter((c) => stage.includes(c.stage));
     if (co.length) l = l.filter((c) => co.includes(c.inChargeOver ? "yes" : "no"));
-    if (mp.length) l = l.filter((c) => mp.includes(c.maritzPortal ? "yes" : "no"));
-    if (vc.length) l = l.filter((c) => vc.some((v) => (v === "past" ? c.segment === "viper-past" : v === "yes" ? !!c.viperCustomer : !c.viperCustomer)));
+    if (cust.length) l = l.filter((c) => cust.includes(customerKindOf(c)));
     if (owed.length) l = l.filter((c) => owed.some((v) => (v === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0)));
     if (q.trim()) {
       const k = q.toLowerCase();
@@ -1759,9 +1783,9 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived, showOffices, foc]);
+  }, [clients, seg, bill, stage, co, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
-  const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 1fr 0.9fr 40px";
+  const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 0.9fr 40px";
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -1784,8 +1808,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
           <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
           <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="In ChargeOver" values={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Maritz Portal" values={mp} onChange={setMp} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
-          <HeaderFilter label="Viper Customer" values={vc} onChange={setVc} align="center" options={[["yes", "Yes"], ["no", "No"], ["past", "Past Viper Customer"]]} />
+          <HeaderFilter label="Customer" values={cust} onChange={setCust} align="center" options={CUSTOMER_ORDER.map((k) => [k, CUSTOMER_KIND[k].label])} />
           <HeaderFilter label="Owed / rate" values={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
         </div>

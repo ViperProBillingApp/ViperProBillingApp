@@ -1319,13 +1319,20 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onCl
           <MenuIcon name={icon} size={30} color="#fff" />
         </div>
       )}
-      <div style={{ position: "relative", paddingRight: 36 }}>
+      {/* height:100% + flex column + marginTop:auto on the value/sub group —
+          pins the number and its caption to the bottom-left of every tile
+          regardless of how many lines the label above wraps to, so they line
+          up across the row instead of floating at whatever height the label
+          left them. */}
+      <div style={{ position: "relative", paddingRight: 36, height: "100%", display: "flex", flexDirection: "column" }}>
         <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
           <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0, boxShadow: "0 1px 2px rgba(22,48,95,0.4), inset 0 -1px 1px rgba(0,0,0,0.15)" }} />
           <span style={{ fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
         </div>
-        <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, color: "#fff", textShadow: "0 1px 2px rgba(20,40,80,0.4)" }}>{value}</div>
-        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.88)", marginTop: 1, textShadow: "0 1px 2px rgba(20,40,80,0.3)" }}>{sub}</div>
+        <div style={{ marginTop: "auto" }}>
+          <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, color: "#fff", textShadow: "0 1px 2px rgba(20,40,80,0.4)" }}>{value}</div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.88)", marginTop: 1, textShadow: "0 1px 2px rgba(20,40,80,0.3)" }}>{sub}</div>
+        </div>
       </div>
     </Tag>
   );

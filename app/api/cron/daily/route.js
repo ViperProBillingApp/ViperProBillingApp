@@ -42,7 +42,7 @@ async function runDaily(forceEmail = false) {
     return { ok: true, snapshot: k.date, emailed: false, reason: "weekly digest — emails Mondays only", backup };
   }
 
-  const cur = (state.settings || {}).currency || "GBP";
+  const cur = (state.settings || {}).currency || "USD";
   const owed = topOwed(active, 10);
   // Never sum across currencies — show each currency's owed total separately
   // (a single £-labelled figure that added USD + EUR would be wrong).

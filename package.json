@@ -11,7 +11,7 @@
     "build": "next build",
     "start": "next start",
     "seed": "node scripts/seed.mjs",
-    "check": "node scripts/check-auth.mjs && node scripts/check-replies.mjs && node scripts/check-emailstore.mjs && node scripts/check-recycle.mjs"
+    "check": "node scripts/check-auth.mjs && node scripts/check-replies.mjs && node scripts/check-emailstore.mjs && node scripts/check-recycle.mjs && node scripts/check-money.mjs"
   },
   "keywords": [],
   "author": "",

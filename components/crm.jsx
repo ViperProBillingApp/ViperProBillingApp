@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Papa from "papaparse";
 import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
-import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed, csvSafe, csvSafeRow } from "../lib/metrics.js";
+import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed, csvSafe, csvSafeRow, owesNow, contributesMrr, isNotUpToDate } from "../lib/metrics.js";
 import UsersAdmin from "./users-admin.jsx";
 
 /* ================================================================== *
@@ -97,7 +97,9 @@ function monthName(date = new Date()) { return date.toLocaleString("en-GB", { mo
 // ISO timestamps (with a T) keep their exact instant.
 function parseDate(s) { if (!s) return null; const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); const d = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(s); return isNaN(d.getTime()) ? null : d; }
 function fmtDate(s) { const d = parseDate(s); return d ? d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"; }
-function money(a, cur) { return `${SYMBOL[cur] || "£"}${(Number(a) || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`; }
+// Fallback is USD — see fmtMoney in lib/metrics.js. A third of the cards have no
+// currency set and ChargeOver bills in dollars, so "£" was wrong for all of them.
+function money(a, cur) { return `${SYMBOL[cur] || "$"}${(Number(a) || 0).toLocaleString("en-GB", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`; }
 function firstName(n) { return (n || "there").trim().split(/\s+/)[0]; }
 function uid() { return Math.random().toString(36).slice(2, 10); }
 function monthIndex(d) { return d.getFullYear() * 12 + d.getMonth(); }
@@ -381,6 +383,8 @@ export default function CRM({ user }) {
   const [loaded, setLoaded] = useState(false);
   const [saveState, setSaveState] = useState("idle"); // idle | saving | saved | error
   const [tab, setTab] = useState("digest");
+  // Which StatStrip metric the Clients grid is drilled into, if any (STAT_FOCUS key).
+  const [focus, setFocus] = useState(null);
   const [modal, setModal] = useState(null);
   const [menuOpen, setMenuOpen] = useState(false); // phone-only hamburger menu; ignored on desktop
   const [detailId, setDetailId] = useState(null);
@@ -815,7 +819,8 @@ export default function CRM({ user }) {
               <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em", color: "#fff" }}>Client Billing CRM</h1>
               {sync.msg && <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.78)", marginTop: 8 }}>{sync.msg}</p>}
             </header>
-            <StatStrip clients={active} settings={settings} bounced={bounced.length} />
+            <StatStrip clients={active} settings={settings} bounced={bounced.length}
+              onFocus={(k) => { setFocus(k); setTab("clients"); }} />
           </div>
           {/* Tab row — actions live on the same line, right-aligned. Inline
               display so the right-alignment holds even if the .flex utility
@@ -847,7 +852,7 @@ export default function CRM({ user }) {
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
-            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
+            {tab === "clients" && <ClientsTab clients={clients} settings={settings} templates={templates} focus={focus} onClearFocus={() => setFocus(null)} onOpen={setDetailId} onEmail={openCompose} onUpdate={update} onUpdateWithLog={updateWithLog} />}
             {/* Archived former customers still surface on the board while marked for suspension */}
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={recoverable} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
@@ -1229,7 +1234,18 @@ function ComposeModal({ client, settings, templates, initialType, onClose, onLog
 }
 
 /* ---------------------------- Stat strip ---------------------------- */
-function StatStrip({ clients, settings, bounced }) {
+// Clicking a metric drills into the clients it counted. `test` mirrors the
+// matching branch of computeKpis (shared predicates in lib/metrics.js) so the
+// tile's number and the resulting grid always agree.
+const STAT_FOCUS = {
+  "not-up-to-date": { label: "Not up to date", test: isNotUpToDate },
+  owed: { label: "Owing money", test: (c) => owesNow(c) },
+  mrr: { label: "Contributing to MRR", test: contributesMrr },
+  "follow-ups": { label: "Needs a follow-up", test: (c) => needsFollowUp(c) },
+  bounced: { label: "Bounced contacts", test: (c) => c.emailStatus !== "ok" },
+};
+
+function StatStrip({ clients, settings, bounced, onFocus }) {
   const s = useMemo(() => {
     // One aggregation for the strip, the Reports tab, and the digest cron — lib/metrics.js.
     const k = computeKpis(clients, settings);
@@ -1238,11 +1254,16 @@ function StatStrip({ clients, settings, bounced }) {
   }, [clients, settings.currency]);
   return (
     <section className="grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 8, marginBottom: 14 }}>
-      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} bg="240,245,252" icon="alert" />
-      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} bg="228,237,249" icon="dollar" />
-      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} bg="216,229,246" icon="trend" />
-      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} bg="204,221,243" icon="bell" />
-      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} bg="192,213,240" icon="mailx" />
+      <Stat label="Not up to date" value={String(s.notUpToDate)} sub="per ChargeOver status" accent={s.notUpToDate ? C.red : C.green} bg="240,245,252" icon="alert"
+        onClick={() => onFocus("not-up-to-date")} title={`Show the ${s.notUpToDate} clients not up to date`} />
+      <Stat label="Total owed" value={s.owedStr} sub={s.synced ? `${s.overdue} in arrears · ${s.synced}/${s.total} synced` : `${s.overdue} in arrears (run Sync)`} accent={C.red} small={s.owedStr.length > 12} bg="228,237,249" icon="dollar"
+        onClick={() => onFocus("owed")} title={`Show the ${s.overdue} clients in arrears`} />
+      <Stat label="Monthly recurring revenue" value={money(Math.round(s.mrr), settings.currency)} sub={`from ChargeOver · ${s.mrrKnown}/${s.total} known`} accent={C.green} bg="216,229,246" icon="trend"
+        onClick={() => onFocus("mrr")} title={`Show the ${s.mrrKnown} clients with a rate on file`} />
+      <Stat label="Follow-ups" value={String(s.followUps)} sub="to contact / awaiting reply" accent={s.followUps ? C.amber : C.green} bg="204,221,243" icon="bell"
+        onClick={() => onFocus("follow-ups")} title={`Show the ${s.followUps} clients needing a follow-up`} />
+      <Stat label="Bounced" value={String(bounced)} sub="contacts to recover" accent={bounced ? C.red : C.green} bg="192,213,240" icon="mailx"
+        onClick={() => onFocus("bounced")} title={`Show the ${bounced} bounced contacts`} />
     </section>
   );
 }
@@ -1251,10 +1272,15 @@ function StatStrip({ clients, settings, bounced }) {
 // through) under a big curved specular reflection, a hard top lip, deep
 // bottom-edge shading and a lifted drop shadow — read as a 3D glass bubble.
 // Watermark glyph sits in the bottom-right corner.
-function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246" }) {
+// `onClick` turns the tile into a button that drills into the clients behind it.
+function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onClick, title }) {
+  const Tag = onClick ? "button" : "div";
   return (
-    <div style={{
+    <Tag type={onClick ? "button" : undefined} onClick={onClick} title={title} style={{
       position: "relative", overflow: "hidden",
+      // Button reset — the glass styling below assumes a plain box.
+      font: "inherit", color: "inherit", textAlign: "left", width: "100%", display: "block",
+      cursor: onClick ? "pointer" : "default",
       background: `linear-gradient(160deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0.1) 42%, rgba(255,255,255,0) 60%, rgba(22,48,95,0.10) 100%), rgba(${bg},0.78)`,
       backdropFilter: "blur(12px) saturate(1.5)", WebkitBackdropFilter: "blur(12px) saturate(1.5)",
       borderRadius: 14, border: "1px solid rgba(255,255,255,0.6)", padding: "9px 10px",
@@ -1283,7 +1309,7 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246" }) {
         <div style={{ fontSize: small ? 12.5 : 16, fontWeight: 600, fontFamily: MONO, letterSpacing: "-0.02em", lineHeight: 1.25, textShadow: "0 1px 0 rgba(255,255,255,0.7)" }}>{value}</div>
         <div style={{ fontSize: 10, color: C.faint, marginTop: 1 }}>{sub}</div>
       </div>
-    </div>
+    </Tag>
   );
 }
 
@@ -1611,7 +1637,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
   );
 });
 
-function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
+function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const [seg, setSeg] = useState("all");
   const [bill, setBill] = useState("all");
   const [stage, setStage] = useState("all");
@@ -1624,11 +1650,15 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
   const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
   const activeCount = [seg, bill, stage, co, mp, vc, owed].filter((v) => v !== "all").length + (q.trim() ? 1 : 0);
   const clearAll = () => { setSeg("all"); setBill("all"); setStage("all"); setCo("all"); setMp("all"); setVc("all"); setOwed("all"); setQ(""); };
+  const foc = focus ? STAT_FOCUS[focus] : null;
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     // Offices covered by a group card stay off the main list — the group card
     // represents them. The Multi-offices toggle flips to showing just them.
-    l = l.filter((c) => (showOffices ? c.multiOffice && !c.groupBillingMaster : !coveredByGroup(c)));
+    // A metric drill-down skips that hiding, so the grid can't come up short
+    // against the number on the tile the user just clicked.
+    if (foc) l = l.filter(foc.test);
+    else l = l.filter((c) => (showOffices ? c.multiOffice && !c.groupBillingMaster : !coveredByGroup(c)));
     if (seg !== "all") l = l.filter((c) => c.segment === seg);
     if (bill !== "all") l = l.filter((c) => c.billingStatus === bill);
     if (stage !== "all") l = l.filter((c) => c.stage === stage);
@@ -1644,7 +1674,7 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived, showOffices]);
+  }, [clients, seg, bill, stage, co, mp, vc, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
   const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 1fr 0.9fr 40px";
   return (
@@ -1654,6 +1684,14 @@ function ClientsTab({ clients, settings, templates, onOpen, onEmail, onUpdate, o
           {list.length} of {totalActive}
           {activeCount > 0 && <span style={{ color: C.action, fontWeight: 600 }}> · {activeCount} filter{activeCount > 1 ? "s" : ""} active</span>}
         </span>
+        {/* Drill-down chip — click to drop back to the full list */}
+        {foc && (
+          <button onClick={onClearFocus} title="Show all clients again" className="flex items-center"
+            style={{ gap: 6, background: C.boardGradient, color: "#fff", border: "none", borderRadius: 20, padding: "4px 8px 4px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+            {foc.label}
+            <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(255,255,255,0.25)", fontSize: 11, lineHeight: 1 }}>×</span>
+          </button>
+        )}
         {activeCount > 0 && <button onClick={clearAll} style={{ fontSize: 12, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear filters</button>}
         <label className="flex items-center" style={{ gap: 6, fontSize: 12.5, color: C.sub, cursor: "pointer", marginLeft: "auto" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} /> Archived

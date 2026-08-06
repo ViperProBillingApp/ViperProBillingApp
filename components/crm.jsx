@@ -1102,7 +1102,9 @@ function PricingPanel({ settings, onSave }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact, dark, messageRows }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact, dark, messageRows, topSend }) {
+  // topSend: the compose modal wants Send at the top right, not buried below a
+  // 20-row message box where reaching it means scrolling past the whole form.
   // compact: tighter inputs so the whole editor (incl. Send) fits the compose modal without scrolling
   // dark: editor sits on the board gradient (Emails tab) — labels/hints go white, inputs stay white
   // messageRows: override the message textarea's height — the compose modal
@@ -1192,8 +1194,19 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
       onDone?.();
     } catch { setSend({ busy: false, err: "Send failed — try again." }); }
   };
+  const sendBtn = (
+    <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer", flexShrink: 0 }}>
+      {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
+    </button>
+  );
   return (
     <div>
+      {topSend && (
+        <div className="flex items-center justify-end" style={{ gap: 8, marginBottom: 14 }}>
+          {send.err && <span style={{ fontSize: 12, color: redC }}>{send.err}</span>}
+          {sendBtn}
+        </div>
+      )}
       <div className="grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 12 }}>
         <Field dark={dark} label={recipients ? `To · all contacts across ${officeSiblings.length + 1} offices` : "To"}>
           <input style={{ ...inp, fontFamily: MONO, fontSize: monoSize }} value={toStr} onChange={(e) => setToStr(e.target.value)} placeholder="email, email…" />
@@ -1228,9 +1241,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         <p style={{ fontSize: 11.5, color: faintC, marginBottom: 10 }}>No signature image on your user card yet — emails send without one. Add it under Users → your card.</p>
       )}
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-        <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer" }}>
-          {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
-        </button>
+        {!topSend && sendBtn}
         <GhostBtn onClick={copy}>{copied ? "Copied ✓" : "Copy"}</GhostBtn>
         {saved.sentAt && <span style={{ fontSize: 12, color: greenC, fontWeight: 600 }}>✓ Sent {fmtDate(saved.sentAt)}{saved.via === "brevo" ? " · Brevo" : ""}</span>}
         {saved.sentAt && (
@@ -1239,7 +1250,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
             Undo
           </button>
         )}
-        {send.err && <span style={{ fontSize: 12, color: redC }}>{send.err}</span>}
+        {!topSend && send.err && <span style={{ fontSize: 12, color: redC }}>{send.err}</span>}
       </div>
       {/* Post-send follow-through: set statuses without leaving the queue */}
       {saved.sentAt && onUpdateWithLog && (
@@ -1267,7 +1278,7 @@ function ComposeModal({ client, settings, templates, initialType, onClose, onLog
           modal without scrolling. Now the modal fills the viewport (`fill`)
           and the message box gets 20 rows instead of 8, so a normal chase
           email is fully visible without scrolling inside the small box. */}
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} messageRows={20} />
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} messageRows={20} topSend />
     </Modal>
   );
 }

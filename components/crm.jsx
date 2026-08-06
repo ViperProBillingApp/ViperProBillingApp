@@ -1258,9 +1258,13 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
-    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall>
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall wide>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} /></Field>
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} compact />
+      {/* No `compact` — that squeeze existed only to fit the old 540px/6-row
+          modal without scrolling. Now that the modal is wide+tall, the editor
+          gets the same full-size inputs and 8-row message box as the main
+          compose bar instead of a cramped copy of it. */}
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} />
     </Modal>
   );
 }

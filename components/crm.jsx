@@ -1102,9 +1102,12 @@ function PricingPanel({ settings, onSave }) {
 
 // One email, fully editable, three ways out: copy, real Brevo send, or mark
 // sent (for mails sent elsewhere). Shared by the Comms tab and the per-row dialog.
-function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact, dark }) {
+function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onSent, signatureImage, onUpdateWithLog, officeSiblings = [], compact, dark, messageRows }) {
   // compact: tighter inputs so the whole editor (incl. Send) fits the compose modal without scrolling
   // dark: editor sits on the board gradient (Emails tab) — labels/hints go white, inputs stay white
+  // messageRows: override the message textarea's height — the compose modal
+  // passes a much larger value so a normal chase email is fully visible
+  // without scrolling inside the small box the default row counts give it.
   const inp = compact ? { ...inputStyle, padding: "6px 9px", fontSize: 12.5 } : inputStyle;
   const monoSize = compact ? 12 : 13;
   const subC = dark ? "rgba(255,255,255,0.85)" : C.sub;
@@ -1213,7 +1216,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
         </div>
       </Field>
       <Field dark={dark} label="Subject"><input style={inp} value={subject} onChange={(e) => onLogSent(client.id, key, { subject: e.target.value })} /></Field>
-      <Field dark={dark} label="Message"><textarea rows={compact ? 6 : 8} style={{ ...inp, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
+      <Field dark={dark} label="Message"><textarea rows={messageRows || (compact ? 6 : 8)} style={{ ...inp, fontFamily: SANS, lineHeight: 1.4, resize: "vertical" }} value={body} onChange={(e) => onLogSent(client.id, key, { body: e.target.value })} /></Field>
       {/* Sender's signature — appended automatically by the send route */}
       {signatureImage ? (
         <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
@@ -1258,13 +1261,13 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
 function ComposeModal({ client, settings, templates, initialType, onClose, onLogSent, onSent, signatureImage, onUpdateWithLog, officeSiblings = [] }) {
   const [type, setType] = useState(initialType || "reminder");
   return (
-    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall wide>
+    <Modal title={`Email · ${client.company || client.name}`} onClose={onClose} blueHeader tall wide fill>
       <Field label="Template"><MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} /></Field>
       {/* No `compact` — that squeeze existed only to fit the old 540px/6-row
-          modal without scrolling. Now that the modal is wide+tall, the editor
-          gets the same full-size inputs and 8-row message box as the main
-          compose bar instead of a cramped copy of it. */}
-      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} />
+          modal without scrolling. Now the modal fills the viewport (`fill`)
+          and the message box gets 20 rows instead of 8, so a normal chase
+          email is fully visible without scrolling inside the small box. */}
+      <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={onClose} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} officeSiblings={officeSiblings} messageRows={20} />
     </Modal>
   );
 }
@@ -4706,10 +4709,16 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
   );
 }
 
-function Modal({ title, onClose, children, wide, blueHeader, tall }) {
+// `fill`: the panel gets a FIXED height (not just a cap), so it fills the
+// viewport regardless of how much content is inside — `maxHeight` alone only
+// crops content taller than the cap, it doesn't stretch shorter content to
+// match. Opt-in per caller so existing tall/wide modals (which size to their
+// content) don't change shape.
+function Modal({ title, onClose, children, wide, blueHeader, tall, fill }) {
   return (
     <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540, maxHeight: tall ? "96vh" : "88vh", overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540,
+        ...(fill ? { height: "92vh" } : { maxHeight: tall ? "96vh" : "88vh" }), overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
         <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}`, background: blueHeader ? C.boardGradient : undefined }}>
           <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, color: blueHeader ? "#fff" : undefined }}>{title}</h2>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: blueHeader ? "rgba(255,255,255,0.85)" : C.sub, cursor: "pointer", padding: 4, margin: -4 }}>✕</button>

@@ -42,9 +42,17 @@ const { mapCustomer, mergeCustomers, unround } = await import("../lib/chargeover
   let r = mergeCustomers(st, [mapCustomer({ customer_id: 1, company: "A", bill_contact: { email: "a@a.com" } })]);
   assert.deepStrictEqual([r.added, r.updated], [1, 0], "new customer added");
 
+  // Company is staff-curated (merges, renames, disambiguating group offices) —
+  // ChargeOver's own customer-name field must NOT overwrite it once set, or a
+  // manual rename silently reverts on the next nightly sync (this happened for
+  // real: TAM's merge rename was undone with no activity log entry to explain why).
   r = mergeCustomers({ clients: r.clients }, [mapCustomer({ customer_id: 1, company: "A Renamed", bill_contact: { email: "a@a.com" } })]);
   assert.deepStrictEqual([r.added, r.updated, r.clients.length], [0, 1, 1], "same id updates, no duplicate");
-  assert.strictEqual(r.clients[0].company, "A Renamed", "identity refreshed on update");
+  assert.strictEqual(r.clients[0].company, "A", "an existing company name is never overwritten by CO's own name");
+
+  // A blank company DOES get filled in from ChargeOver — only overwriting is disallowed.
+  r = mergeCustomers({ clients: [{ id: "y", chargeoverId: "2", email: "blank@b.com", company: "" }] }, [mapCustomer({ customer_id: 2, company: "Filled In", bill_contact: { email: "blank@b.com" } })]);
+  assert.strictEqual(r.clients[0].company, "Filled In", "a blank company is filled in from ChargeOver");
 
   // Retired customers must never be re-created by a sync. Deleting a
   // ChargeOver-linked client used to be undone on the next sync, which silently

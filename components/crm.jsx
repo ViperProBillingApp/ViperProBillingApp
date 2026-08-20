@@ -330,9 +330,14 @@ function normalise(r) {
     // silently defaulting to false, so an old cached client state can't wipe it.
     inChargeOver: r.inChargeOver === undefined ? !!(r.chargeoverId && String(r.chargeoverId).trim()) : !!r.inChargeOver,
     // Active ChargeOver recurring billing package, refreshed by the same rotating
-    // backfill as coAmountAt. Self-heals to the old chargeoverId-presence guess
-    // until that backfill has actually checked this client.
-    coHasSubscription: r.coAmountAt ? !!r.coHasSubscription : !!(r.chargeoverId && String(r.chargeoverId).trim()),
+    // backfill as coAmountAt. coAmountAt predates this field (it was already
+    // being set by the amount/cadence backfill before coHasSubscription
+    // existed), so a client last backfilled before this field shipped has a
+    // real coAmountAt but no coHasSubscription at all — checking coAmountAt
+    // here treated that "never actually set" undefined as a trustworthy false.
+    // Check the field's own presence instead: self-heal to the old
+    // chargeoverId-presence guess until a backfill has genuinely set this.
+    coHasSubscription: typeof r.coHasSubscription === "boolean" ? r.coHasSubscription : !!(r.chargeoverId && String(r.chargeoverId).trim()),
     workflowHidden: !!r.workflowHidden,
     // Self-healing: being IN the Maritz segment means having the portal — a
     // manual add that only set the segment used to show "Not Maritz" in the list.

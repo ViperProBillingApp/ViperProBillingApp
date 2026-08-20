@@ -1444,8 +1444,10 @@ function ReportsTab({ clients, settings, onOpen }) {
 
   return (
     <div className="grid" style={{ gap: 12 }}>
-      {/* KPI cards — every figure comes from computeKpis, same as the header strip */}
-      <section className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+      {/* KPI cards — every figure comes from computeKpis, same as the header strip.
+          Same board-gradient box as the dashboard metrics section, since the Stat
+          tiles' text/icon is white and needs the dark blue behind it to read. */}
+      <section className="grid" style={{ background: C.boardGradient, borderRadius: 12, padding: 14, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
         <Stat label="Monthly recurring revenue" value={money(k.mrr, cur)} sub={`billing packages · ${k.mrrKnown}/${k.totalClients} amounts known`} accent={C.green} />
         <Stat label="Annual recurring revenue" value={money(k.arr, cur)} sub="MRR × 12" accent={C.green} />
         <Stat label="Total owed" value={money(k.totalOwed, cur)} sub={`${k.overdue} clients in arrears`} accent={k.totalOwed ? C.red : C.green} />

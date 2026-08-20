@@ -329,6 +329,10 @@ function normalise(r) {
     // never explicitly set — infer true from having a ChargeOver ID rather than
     // silently defaulting to false, so an old cached client state can't wipe it.
     inChargeOver: r.inChargeOver === undefined ? !!(r.chargeoverId && String(r.chargeoverId).trim()) : !!r.inChargeOver,
+    // Active ChargeOver recurring billing package, refreshed by the same rotating
+    // backfill as coAmountAt. Self-heals to the old chargeoverId-presence guess
+    // until that backfill has actually checked this client.
+    coHasSubscription: r.coAmountAt ? !!r.coHasSubscription : !!(r.chargeoverId && String(r.chargeoverId).trim()),
     workflowHidden: !!r.workflowHidden,
     // Self-healing: being IN the Maritz segment means having the portal — a
     // manual add that only set the segment used to show "Not Maritz" in the list.
@@ -1713,7 +1717,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
           {STAGES_ALPHA.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
         </select>
       </div>
-      <BoolCell value={c.inChargeOver} onChange={(v) => onUpdate(c.id, { inChargeOver: v })} trueLabel="In ChargeOver" falseLabel="Not in ChargeOver" title="In ChargeOver" />
+      <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
         <select value={customerKindOf(c)} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, customerKindPatch(e.target.value))}
           title="Customer" style={{ fontSize: 12.5, fontWeight: 600, color: CUSTOMER_KIND[customerKindOf(c)].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
@@ -1764,7 +1768,6 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   const [showArchived, setShowArchived] = useState(false);
   const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
   const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setCust([]); setOwed([]); setQ(""); onClearFocus?.(); };
-  const YN = (v) => (v === "yes" ? "Yes" : "No");
   // One chip per selected value, so a grouped filter reads as its parts.
   const chipsFor = (arr, set, labelOf, prefix) =>
     arr.map((v) => ({ key: `${prefix}:${v}`, label: labelOf(v), clear: () => set(arr.filter((x) => x !== v)) }));
@@ -1775,7 +1778,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     ...chipsFor(seg, setSeg, (v) => SEGMENTS[v]?.label || v, "seg"),
     ...chipsFor(bill, setBill, (v) => BILLING[v]?.label || v, "bill"),
     ...chipsFor(stage, setStage, (v) => STAGES[v]?.label || v, "stage"),
-    ...chipsFor(co, setCo, (v) => `In ChargeOver: ${YN(v)}`, "co"),
+    ...chipsFor(co, setCo, (v) => (v === "yes" ? "Active Subscription" : "No Subscription"), "co"),
     ...chipsFor(cust, setCust, (v) => CUSTOMER_KIND[v]?.label || v, "cust"),
     ...chipsFor(owed, setOwed, (v) => (v === "overdue" ? "Overdue" : "Up to date"), "owed"),
     ...(q.trim() ? [{ key: "q", label: `Search: “${q.trim()}”`, clear: () => setQ("") }] : []),
@@ -1792,7 +1795,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     if (seg.length) l = l.filter((c) => seg.includes(c.segment));
     if (bill.length) l = l.filter((c) => bill.includes(c.billingStatus));
     if (stage.length) l = l.filter((c) => stage.includes(c.stage));
-    if (co.length) l = l.filter((c) => co.includes(c.inChargeOver ? "yes" : "no"));
+    if (co.length) l = l.filter((c) => co.includes(c.coHasSubscription ? "yes" : "no"));
     if (cust.length) l = l.filter((c) => cust.includes(customerKindOf(c)));
     if (owed.length) l = l.filter((c) => owed.some((v) => (v === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0)));
     if (q.trim()) {
@@ -1827,7 +1830,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
           <HeaderFilter label="Client" values={seg} onChange={setSeg} options={SEGMENTS_ALPHA.map((k) => [k, SEGMENTS[k].label])} />
           <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
           <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
-          <HeaderFilter label="In ChargeOver" values={co} onChange={setCo} align="center" options={[["yes", "Yes"], ["no", "No"]]} />
+          <HeaderFilter label="Subscription" values={co} onChange={setCo} align="center" options={[["yes", "Active Subscription"], ["no", "No Subscription"]]} />
           <HeaderFilter label="Customer" values={cust} onChange={setCust} align="center" options={CUSTOMER_ORDER.map((k) => [k, CUSTOMER_KIND[k].label])} />
           <HeaderFilter label="Owed / rate" values={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />

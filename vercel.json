@@ -3,6 +3,6 @@
     { "path": "/api/sync/chargeover", "schedule": "0 6 * * *" },
     { "path": "/api/cron/daily", "schedule": "30 6 * * *" },
     { "path": "/api/sync/brevo", "schedule": "0 7 * * *" },
-    { "path": "/api/gmail/poll-broad", "schedule": "*/15 * * * *" }
+    { "path": "/api/gmail/poll-broad", "schedule": "15 7 * * *" }
   ]
 }

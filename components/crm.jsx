@@ -491,6 +491,26 @@ export default function CRM({ user }) {
     const iv = setInterval(tick, 120000);
     return () => { stop = true; clearInterval(iv); };
   }, [loaded, loadReplies]);
+  // Whole-mailbox scan (not just crm-replies-labeled mail) — on a longer
+  // interval since it's more work per call. The Vercel cron for this route
+  // only runs once a day (the plan caps cron frequency), so an open tab is
+  // the real near-real-time path; the daily cron is just the safety net for
+  // whenever nobody has the CRM open. Best-effort: failures here don't touch
+  // mailErr, which stays the crm-replies poll's own health signal.
+  useEffect(() => {
+    if (!loaded) return;
+    let stop = false;
+    const tick = async () => {
+      try {
+        const r = await fetch("/api/gmail/poll-broad", { method: "POST" });
+        if (stop) return;
+        if (r.ok) await loadReplies();
+      } catch { /* best-effort — next tick retries */ }
+    };
+    tick();
+    const iv = setInterval(tick, 600000);
+    return () => { stop = true; clearInterval(iv); };
+  }, [loaded, loadReplies]);
 
   const templates = useMemo(() => getTemplates(settings), [settings]);
 

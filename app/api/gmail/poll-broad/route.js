@@ -26,7 +26,9 @@ async function runBroadPoll() {
   return { ok: true, ...result };
 }
 
-// Vercel Cron — runs on a schedule regardless of whether the CRM is open.
+// Vercel Cron — the once-a-day safety net for whenever nobody has the CRM
+// open (the plan's cron frequency cap doesn't allow more than this — see
+// POST below for the actual near-real-time path).
 export async function GET(req) {
   const secret = process.env.CRON_SECRET;
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -41,11 +43,13 @@ export async function GET(req) {
   }
 }
 
-// Manual trigger — admins only, for forcing a run without waiting for the cron.
+// The real near-real-time path: called automatically every few minutes by
+// any open, signed-in CRM tab (see the useEffect in crm.jsx) — same pattern
+// as the crm-replies poll, and not gated to admins, since coverage shouldn't
+// depend on which staff member happens to have a tab open.
 export async function POST() {
   const me = await getSessionUser();
   if (!me) return NextResponse.json({ error: "Not signed in" }, { status: 401 });
-  if (me.role !== "admin") return NextResponse.json({ error: "Admin only" }, { status: 403 });
   if (!gmailConfigured()) return NextResponse.json({ error: "Gmail is not configured." }, { status: 501 });
   try {
     return NextResponse.json(await runBroadPoll());

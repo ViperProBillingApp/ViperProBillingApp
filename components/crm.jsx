@@ -376,6 +376,12 @@ function normalise(r) {
     lastPaid: (r.lastPaid || "").trim(),
     payments: Array.isArray(r.payments) ? r.payments : [],
     emailStatus: ["bounced", "undelivered"].includes(r.emailStatus) ? r.emailStatus : "ok",
+    // Is this company's contact still reachable? true = replied/active, false =
+    // bounced or no reply evidence found, null = never checked yet (no usable
+    // email, or the liveness check hasn't run). Self-heals to null for records
+    // saved before this field existed, rather than a false "confirmed dead".
+    contactLive: typeof r.contactLive === "boolean" ? r.contactLive : null,
+    contactLiveCheckedAt: r.contactLiveCheckedAt || "",
     secondaryContacts: Array.isArray(r.secondaryContacts) ? r.secondaryContacts : [],
     archivedContacts: r.archivedContacts || [],
     candidates: r.candidates || [],
@@ -1685,6 +1691,33 @@ function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
   );
 }
 
+// Green = replied/active, red = bounced or no reply evidence found, grey =
+// never checked yet. Editable like the other status cells, since a human
+// sometimes knows better than the last automated check.
+const CONTACT_LIVE = {
+  true: { label: "Live", color: "#1E8E5A" },
+  false: { label: "Dead — find a new contact", color: "#C23B3B" },
+  null: { label: "Not checked yet", color: "#9AA3AF" },
+};
+function ContactLiveDot({ value, size = 8, title }) {
+  const v = CONTACT_LIVE[String(value)];
+  return <span title={title || v.label} style={{ width: size, height: size, borderRadius: size, background: v.color, flexShrink: 0, display: "inline-block" }} />;
+}
+function ContactLiveCell({ value, onChange, checkedAt }) {
+  const title = `Contact: ${CONTACT_LIVE[String(value)].label}${checkedAt ? ` (checked ${new Date(checkedAt).toLocaleDateString()})` : ""}`;
+  return (
+    <div className="flex items-center" style={{ gap: 6, minWidth: 0, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+      <ContactLiveDot value={value} title={title} />
+      <select value={String(value)} onChange={(e) => onChange(e.target.value === "null" ? null : e.target.value === "true")}
+        title={title} style={{ fontSize: 12, fontWeight: 600, color: CONTACT_LIVE[String(value)].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
+        <option value="true">Live</option>
+        <option value="false">Dead</option>
+        <option value="null">Not checked</option>
+      </select>
+    </div>
+  );
+}
+
 // One client row, memoized: with hundreds of clients, typing in the detail
 // drawer only re-renders the edited client's row instead of the whole table.
 const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
@@ -1723,6 +1756,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
         </select>
       </div>
       <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
+      <ContactLiveCell value={c.contactLive} checkedAt={c.contactLiveCheckedAt} onChange={(v) => onUpdate(c.id, { contactLive: v, contactLiveCheckedAt: new Date().toISOString() })} />
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
         <select value={customerKindOf(c)} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, customerKindPatch(e.target.value))}
           title="Customer" style={{ fontSize: 12.5, fontWeight: 600, color: CUSTOMER_KIND[customerKindOf(c)].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
@@ -1767,12 +1801,13 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   const [bill, setBill] = useState([]);
   const [stage, setStage] = useState([]);
   const [co, setCo] = useState([]);
+  const [contact, setContact] = useState([]);
   const [cust, setCust] = useState([]); // combined Maritz Portal / Viper / Maritz & Viper / Neither
   const [owed, setOwed] = useState([]);
   const [q, setQ] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [showOffices, setShowOffices] = useState(false); // grouped offices live behind this toggle
-  const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setCust([]); setOwed([]); setQ(""); onClearFocus?.(); };
+  const clearAll = () => { setSeg([]); setBill([]); setStage([]); setCo([]); setContact([]); setCust([]); setOwed([]); setQ(""); onClearFocus?.(); };
   // One chip per selected value, so a grouped filter reads as its parts.
   const chipsFor = (arr, set, labelOf, prefix) =>
     arr.map((v) => ({ key: `${prefix}:${v}`, label: labelOf(v), clear: () => set(arr.filter((x) => x !== v)) }));
@@ -1784,6 +1819,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     ...chipsFor(bill, setBill, (v) => BILLING[v]?.label || v, "bill"),
     ...chipsFor(stage, setStage, (v) => STAGES[v]?.label || v, "stage"),
     ...chipsFor(co, setCo, (v) => (v === "yes" ? "Active Subscription" : "No Subscription"), "co"),
+    ...chipsFor(contact, setContact, (v) => `Contact: ${CONTACT_LIVE[v]?.label || v}`, "contact"),
     ...chipsFor(cust, setCust, (v) => CUSTOMER_KIND[v]?.label || v, "cust"),
     ...chipsFor(owed, setOwed, (v) => (v === "overdue" ? "Overdue" : "Up to date"), "owed"),
     ...(q.trim() ? [{ key: "q", label: `Search: “${q.trim()}”`, clear: () => setQ("") }] : []),
@@ -1801,6 +1837,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     if (bill.length) l = l.filter((c) => bill.includes(c.billingStatus));
     if (stage.length) l = l.filter((c) => stage.includes(c.stage));
     if (co.length) l = l.filter((c) => co.includes(c.coHasSubscription ? "yes" : "no"));
+    if (contact.length) l = l.filter((c) => contact.includes(String(c.contactLive)));
     if (cust.length) l = l.filter((c) => cust.includes(customerKindOf(c)));
     if (owed.length) l = l.filter((c) => owed.some((v) => (v === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0)));
     if (q.trim()) {
@@ -1811,9 +1848,9 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, cust, owed, q, showArchived, showOffices, foc]);
+  }, [clients, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
-  const gridCols = "1.3fr 0.95fr 0.75fr 1fr 1fr 0.9fr 40px";
+  const gridCols = "1.2fr 0.85fr 0.7fr 0.9fr 0.85fr 0.9fr 0.9fr 40px";
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -1836,6 +1873,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
           <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
           <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
           <HeaderFilter label="Subscription" values={co} onChange={setCo} align="center" options={[["yes", "Active Subscription"], ["no", "No Subscription"]]} />
+          <HeaderFilter label="Contact" values={contact} onChange={setContact} align="center" options={[["true", "Live"], ["false", "Dead"], ["null", "Not checked"]]} />
           <HeaderFilter label="Customer" values={cust} onChange={setCust} align="center" options={CUSTOMER_ORDER.map((k) => [k, CUSTOMER_KIND[k].label])} />
           <HeaderFilter label="Owed / rate" values={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
           <span />
@@ -3190,7 +3228,8 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
         <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px", gap: 12 }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em", color: "#fff" }}>
-              {client.company || client.name}
+              <ContactLiveDot value={client.contactLive} size={9} title={`Contact: ${CONTACT_LIVE[String(client.contactLive)].label}`} />
+              <span style={{ marginLeft: 8 }}>{client.company || client.name}</span>
               <CopyNameBtn text={client.company || client.name} light />
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.7)", marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
               {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}

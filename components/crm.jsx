@@ -809,7 +809,10 @@ export default function CRM({ user }) {
       if (Array.isArray(sd.clients)) setClients(synced);
       revRef.current = sd.rev || 0; // sync bumped the rev; adopt it so saves keep flowing
       baselineRef.current = new Map(synced.map((c) => [c.id, JSON.stringify(c)])); // re-baseline against synced data
-      setSync({ busy: false, msg: `ChargeOver synced: ${d.added} added, ${d.updated} updated (${d.customers} customers).` });
+      const dupeWarning = d.duplicateChargeoverIds?.length
+        ? ` ⚠ ${d.duplicateChargeoverIds.length} ChargeOver ID(s) are on more than one card — the sync only ever updates one of them, so the other silently goes stale: ${d.duplicateChargeoverIds.map((x) => `CO#${x.chargeoverId} (${x.cards.map((c) => c.company).join(" / ")})`).join("; ")}. Merge or clear the extra card's ID.`
+        : "";
+      setSync({ busy: false, msg: `ChargeOver synced: ${d.added} added, ${d.updated} updated (${d.customers} customers).${dupeWarning}` });
     } catch {
       setSync({ busy: false, msg: "Sync failed — try again." });
     }
@@ -1740,9 +1743,20 @@ function ContactLiveCell({ value, onChange, checkedAt }) {
 
 // One client row, memoized: with hundreds of clients, typing in the detail
 // drawer only re-renders the edited client's row instead of the whole table.
-const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
+const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, groupMaster, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const behind = arrearsPeriods(c);
   const cur = c.currency || settings.currency;
+  // A covered-by-group office's OWN billingStatus/stage only ever gets set
+  // once, at creation — nothing auto-updates it afterward, so it silently
+  // drifts from reality as the group's real status moves on. Read from the
+  // group master instead of the card's own (stale-prone) fields whenever one
+  // is known; this is why RMC/PRA/Tropical Incentives/Hosts Global/Lafayette/
+  // Hello!/Connect DMC/Cohera/Destination Asia all needed a one-off data fix
+  // on 2026-09-02 — this makes that class of bug structurally impossible to
+  // recur, since there's nothing stored on the office card left to go stale.
+  const inheriting = groupMaster && coveredByGroup(c);
+  const effBillingStatus = inheriting ? groupMaster.billingStatus : c.billingStatus;
+  const effStage = inheriting ? groupMaster.stage : c.stage;
   // Plain left-click opens the drawer in-page; right/cmd/middle-click on the
   // company-name link lets the browser open ?client=<id> in a new tab/window.
   const openInPage = (e) => {
@@ -1764,16 +1778,32 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
         {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
       </div>
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
-        <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
-          title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
-          {BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}
-        </select>
+        {inheriting ? (
+          <span onClick={(e) => { e.stopPropagation(); onOpen(groupMaster.id); }}
+            title={`Set via the group card "${groupMaster.company || groupMaster.name}" — click to open it`}
+            style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[effBillingStatus].color, background: BILLING[effBillingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", maxWidth: "100%", cursor: "pointer" }}>
+            {BILLING[effBillingStatus].label}
+          </span>
+        ) : (
+          <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
+            title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
+            {BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}
+          </select>
+        )}
       </div>
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
-        <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
-          title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
-          {STAGES_ALPHA.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
-        </select>
+        {inheriting ? (
+          <span onClick={(e) => { e.stopPropagation(); onOpen(groupMaster.id); }}
+            title={`Set via the group card "${groupMaster.company || groupMaster.name}" — click to open it`}
+            style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[effStage].color, padding: "3px 0", maxWidth: "100%", textAlign: "center", cursor: "pointer" }}>
+            {STAGES[effStage].label}
+          </span>
+        ) : (
+          <select value={c.stage} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdateWithLog(c.id, { stage: e.target.value }, "stage", `Stage → ${STAGES[e.target.value].label}`)}
+            title="Workflow stage" style={{ fontSize: 12.5, fontWeight: 600, color: STAGES[c.stage].color, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%", textAlignLast: "center" }}>
+            {STAGES_ALPHA.map((k) => <option key={k} value={k}>{STAGES[k].label}</option>)}
+          </select>
+        )}
       </div>
       <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
       <ContactLiveCell value={c.contactLive} checkedAt={c.contactLiveCheckedAt} onChange={(v) => onUpdate(c.id, { contactLive: v, contactLiveCheckedAt: new Date().toISOString() })} />
@@ -1870,6 +1900,13 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
   }, [clients, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
+  // A covered-by-group office's Billing/Stage cells read from here instead of
+  // their own (stale-prone) fields — see the comment on ClientRow.
+  const groupMasters = useMemo(() => {
+    const m = new Map();
+    for (const cl of clients) if (cl.groupBillingMaster && cl.officeGroup) m.set(cl.officeGroup, cl);
+    return m;
+  }, [clients]);
   const gridCols = "1.2fr 0.85fr 0.7fr 0.9fr 0.85fr 0.9fr 0.9fr 40px";
   return (
     <div>
@@ -1900,6 +1937,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         </div>
         {list.map((c) => (
           <ClientRow key={c.id} c={c} settings={settings} templates={templates} gridCols={gridCols}
+            groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null}
             onOpen={onOpen} onEmail={onEmail} onUpdate={onUpdate} onUpdateWithLog={onUpdateWithLog} />
         ))}
         {list.length === 0 && <div style={{ padding: 32, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}
@@ -3417,6 +3455,14 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
                 title={coveredByGroup(client) ? "Billing is handled by the group card" : undefined}
                 style={{ ...inputStyle, opacity: coveredByGroup(client) ? 0.5 : 1 }} value={client.amount === 0 ? "" : client.amount}
                 onChange={(e) => set({ amount: e.target.value === "" ? 0 : Number(e.target.value) })} />
+            </Field>
+            {/* Same field the Clients list' Subscription column/filter reads —
+                editing it here keeps both views in sync automatically. */}
+            <Field label="Subscription">
+              <CompactSelect value={String(!!client.coHasSubscription)} onChange={(e) => set({ coHasSubscription: e.target.value === "true" })}>
+                <option value="true">Active Subscription</option>
+                <option value="false">No Subscription</option>
+              </CompactSelect>
             </Field>
             {client.multiOffice ? (
               <Field label="Pricing">

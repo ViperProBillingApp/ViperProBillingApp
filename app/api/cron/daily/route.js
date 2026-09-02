@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
 import { computeKpis, topOwed, fmtMoney, arrearsPeriods } from "../../../../lib/metrics.js";
+import { findDuplicateChargeoverIds } from "../../../../lib/chargeover.js";
 import { sendDigestEmail } from "../../../../lib/email.js";
 import { snapshotState, gcExpired } from "../../../../lib/security.js";
 import { readState } from "../../../../lib/clients.js";
@@ -42,6 +43,11 @@ async function runDaily(forceEmail = false) {
     return { ok: true, snapshot: k.date, emailed: false, reason: "weekly digest — emails Mondays only", backup };
   }
 
+  // Checked against every card, not just active ones — the RMC/PRA/Emeco/
+  // Lafayette/Hello!/IMI/Sunlinc/Spaintacular bug was always an active card
+  // silently going stale next to an ARCHIVED one still holding the same ID.
+  const dupes = findDuplicateChargeoverIds(state.clients || []);
+
   const cur = (state.settings || {}).currency || "USD";
   const owed = topOwed(active, 10);
   // Never sum across currencies — show each currency's owed total separately
@@ -62,6 +68,10 @@ ${owed.length ? `<p style="margin-top:16px"><strong>Largest balances</strong></p
 <table style="border-collapse:collapse">${owed.map(({ c, owed: o }) =>
     `<tr><td style="padding:3px 16px 3px 0">${(c.company || c.name || "—").replace(/&/g, "&amp;").replace(/</g, "&lt;")}</td><td style="padding:3px 16px 3px 0;font-weight:600">${fmtMoney(o, c.currency || cur)}</td><td style="padding:3px 0;color:#58585A">${arrearsPeriods(c)} period${arrearsPeriods(c) === 1 ? "" : "s"} behind</td></tr>`).join("")}
 </table>` : "<p>No outstanding balances. Nothing to chase today.</p>"}
+${dupes.length ? `<p style="margin-top:16px;color:#B3261E"><strong>⚠ ${dupes.length} ChargeOver ID${dupes.length === 1 ? " is" : "s are"} on more than one card</strong> — the sync only ever updates the first one it finds, so the other silently goes stale.</p>
+<table style="border-collapse:collapse">${dupes.map((d) =>
+    `<tr><td style="padding:3px 16px 3px 0;color:#58585A">CO#${d.chargeoverId}</td><td style="padding:3px 0;font-weight:600">${d.cards.map((c) => `${(c.company || "—").replace(/&/g, "&amp;").replace(/</g, "&lt;")}${c.archived ? " (archived)" : ""}`).join(" / ")}</td></tr>`).join("")}
+</table>` : ""}
 <p style="margin-top:16px"><a href="https://viper-pro-billing-app.vercel.app">Open ViperPro</a></p>
 <p>Best,<br>ViperPro Accounting Team</p>`;
 

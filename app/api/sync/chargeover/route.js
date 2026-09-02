@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
-import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap } from "../../../../lib/chargeover.js";
+import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap, findDuplicateChargeoverIds } from "../../../../lib/chargeover.js";
 import { updateState } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
@@ -13,7 +13,7 @@ async function runSync() {
   const customers = await fetchAllCustomers();
   const overdue = await fetchOverdueMap().catch(() => null); // best-effort; falls back to raw balance
   const mapped = customers.map(mapCustomer);
-  let added = 0, updated = 0, filled = 0, remaining = 0;
+  let added = 0, updated = 0, filled = 0, remaining = 0, finalClients = [];
   // Merge + backfill INSIDE updateState so it re-applies against fresh state if
   // a UI save lands during the sync — the merge no longer clobbers that save.
   const res = await updateState(db, async (state) => {
@@ -21,10 +21,17 @@ async function runSync() {
     added = merged.added; updated = merged.updated;
     const bf = await backfillRecurringAmounts(merged.clients);
     filled = bf.filled; remaining = bf.remaining;
+    finalClients = merged.clients; // only the value from the attempt that actually commits matters below
     return { clients: merged.clients, settings: state.settings || {} };
   });
   if (!res.ok) return { ok: false, error: "Sync could not commit after repeated concurrent saves — try again." };
-  return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining };
+  // Detection only — never auto-fixed, since picking a survivor needs a human
+  // (see findDuplicateChargeoverIds' doc comment for why this keeps happening).
+  const duplicateChargeoverIds = findDuplicateChargeoverIds(finalClients);
+  if (duplicateChargeoverIds.length) {
+    console.error(`ChargeOver sync: ${duplicateChargeoverIds.length} chargeoverId(s) shared by more than one CRM card:`, JSON.stringify(duplicateChargeoverIds));
+  }
+  return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining, duplicateChargeoverIds };
 }
 
 // Nightly Vercel Cron — authenticated by the CRON_SECRET bearer Vercel injects.

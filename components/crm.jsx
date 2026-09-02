@@ -1757,6 +1757,13 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
   const inheriting = groupMaster && coveredByGroup(c);
   const effBillingStatus = inheriting ? groupMaster.billingStatus : c.billingStatus;
   const effStage = inheriting ? groupMaster.stage : c.stage;
+  // Same story as billing/stage: a covered office has no chargeoverId of its
+  // own, so coHasSubscription self-heals to false — this is what let 85
+  // offices keep exporting as "No Subscription" even after billing/stage
+  // were fixed, since that field was a separate miss. Read the group's real
+  // subscription status, not a hardcoded true — if the group itself ever
+  // loses its subscription, its offices should reflect that too.
+  const effCoHasSubscription = inheriting ? groupMaster.coHasSubscription : c.coHasSubscription;
   // Plain left-click opens the drawer in-page; right/cmd/middle-click on the
   // company-name link lets the browser open ?client=<id> in a new tab/window.
   const openInPage = (e) => {
@@ -1805,7 +1812,16 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
           </select>
         )}
       </div>
-      <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
+      {inheriting ? (
+        <div className="flex items-center" style={{ gap: 6, minWidth: 0, justifyContent: "center", cursor: "pointer" }}
+          onClick={(e) => { e.stopPropagation(); onOpen(groupMaster.id); }}
+          title={`Set via the group card "${groupMaster.company || groupMaster.name}" — click to open it`}>
+          <span style={{ width: 6, height: 6, borderRadius: 6, background: effCoHasSubscription ? C.green : C.faint, flexShrink: 0 }} />
+          <span style={{ fontSize: 12, fontWeight: 600, color: effCoHasSubscription ? C.green : C.faint }}>{effCoHasSubscription ? "Active Subscription" : "No Subscription"}</span>
+        </div>
+      ) : (
+        <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
+      )}
       <ContactLiveCell value={c.contactLive} checkedAt={c.contactLiveCheckedAt} onChange={(v) => onUpdate(c.id, { contactLive: v, contactLiveCheckedAt: new Date().toISOString() })} />
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
         <select value={customerKindOf(c)} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, customerKindPatch(e.target.value))}
@@ -1874,6 +1890,17 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     ...chipsFor(owed, setOwed, (v) => (v === "overdue" ? "Overdue" : "Up to date"), "owed"),
     ...(q.trim() ? [{ key: "q", label: `Search: “${q.trim()}”`, clear: () => setQ("") }] : []),
   ];
+  // A covered-by-group office's Billing/Stage/Subscription reads from here
+  // instead of its own (stale-prone) fields — see the comment on ClientRow.
+  const groupMasters = useMemo(() => {
+    const m = new Map();
+    for (const cl of clients) if (cl.groupBillingMaster && cl.officeGroup) m.set(cl.officeGroup, cl);
+    return m;
+  }, [clients]);
+  const effSubscription = (c) => {
+    const master = c.officeGroup ? groupMasters.get(c.officeGroup) : null;
+    return master && coveredByGroup(c) ? master.coHasSubscription : c.coHasSubscription;
+  };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
     // Offices covered by a group card stay off the main list — the group card
@@ -1886,7 +1913,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     if (seg.length) l = l.filter((c) => seg.includes(c.segment));
     if (bill.length) l = l.filter((c) => bill.includes(c.billingStatus));
     if (stage.length) l = l.filter((c) => stage.includes(c.stage));
-    if (co.length) l = l.filter((c) => co.includes(c.coHasSubscription ? "yes" : "no"));
+    if (co.length) l = l.filter((c) => co.includes(effSubscription(c) ? "yes" : "no"));
     if (contact.length) l = l.filter((c) => contact.includes(String(c.contactLive)));
     if (cust.length) l = l.filter((c) => cust.includes(customerKindOf(c)));
     if (owed.length) l = l.filter((c) => owed.some((v) => (v === "overdue" ? arrearsPeriods(c) >= 1 : arrearsPeriods(c) === 0)));
@@ -1898,15 +1925,8 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
+  }, [clients, groupMasters, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
-  // A covered-by-group office's Billing/Stage cells read from here instead of
-  // their own (stale-prone) fields — see the comment on ClientRow.
-  const groupMasters = useMemo(() => {
-    const m = new Map();
-    for (const cl of clients) if (cl.groupBillingMaster && cl.officeGroup) m.set(cl.officeGroup, cl);
-    return m;
-  }, [clients]);
   const gridCols = "1.2fr 0.85fr 0.7fr 0.9fr 0.85fr 0.9fr 0.9fr 40px";
   return (
     <div>

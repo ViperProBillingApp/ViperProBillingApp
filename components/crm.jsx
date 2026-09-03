@@ -20,6 +20,18 @@ import UsersAdmin from "./users-admin.jsx";
 // the Workflow board's kanban columns and the Reports funnel breakdown.
 const alphaKeys = (obj) => Object.keys(obj).sort((a, b) => obj[a].label.localeCompare(obj[b].label));
 
+// Mirrors lib/chargeover.js's CO_DUPLICATE_IDS (server-only — pulls in
+// node:crypto, so it can't be imported into this client component). Update
+// both together. Warns in the client-detail ChargeOver ID field: typing one
+// of these secondary ids is exactly how Grupos Incentivos Terramar's card
+// started getting silently re-created every night on 2026-09-02 — the sync
+// always skips a known-duplicate id, so a card carrying one never gets
+// touched again and a fresh hollow card appears in its place each sync.
+const KNOWN_CO_DUPLICATE_IDS = {
+  "149": "178", "196": "190", "195": "190", "253": "271", "264": "271",
+  "148": "105", "199": "203", "167": "22", "141": "60", "96": "268",
+};
+
 const SEGMENTS = {
   "viper-current": { label: "Viper Customer", color: "#0E766E" },
   "viper-past": { label: "Past Viper Customer", color: "#8A94A6" },
@@ -3352,7 +3364,14 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <Field label="Company"><input style={inputStyle} value={client.company} onChange={(e) => set({ company: e.target.value })} /></Field>
             <Field label="Email"><input style={inputStyle} value={client.email} onChange={(e) => set({ email: e.target.value })} /></Field>
             <Field label="Phone"><input style={inputStyle} value={client.phone} onChange={(e) => set({ phone: e.target.value })} /></Field>
-            <Field label="ChargeOver ID"><input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" /></Field>
+            <Field label="ChargeOver ID">
+              <input style={inputStyle} value={client.chargeoverId} onChange={(e) => set({ chargeoverId: e.target.value })} placeholder="for sync matching" />
+              {KNOWN_CO_DUPLICATE_IDS[String(client.chargeoverId || "").trim()] !== undefined && (
+                <div style={{ fontSize: 11.5, color: C.red, marginTop: 4, fontWeight: 600 }}>
+                  ⚠ CO#{client.chargeoverId} is a known ChargeOver duplicate — the nightly sync always skips it, so this card will never get live balance updates and a fresh empty card will keep reappearing. Use CO#{KNOWN_CO_DUPLICATE_IDS[String(client.chargeoverId).trim()]} instead.
+                </div>
+              )}
+            </Field>
             <Field label="Owner">
               <CompactSelect value={client.owner || ""} onChange={(e) => set({ owner: e.target.value })}>
                 <option value="">Unassigned</option>

@@ -29,7 +29,7 @@ const alphaKeys = (obj) => Object.keys(obj).sort((a, b) => obj[a].label.localeCo
 // touched again and a fresh hollow card appears in its place each sync.
 const KNOWN_CO_DUPLICATE_IDS = {
   "149": "178", "196": "190", "195": "190", "253": "271", "264": "271",
-  "148": "105", "199": "203", "167": "22", "141": "60", "96": "268",
+  "148": "105", "199": "203", "167": "22", "60": "141", "96": "268",
 };
 
 const SEGMENTS = {

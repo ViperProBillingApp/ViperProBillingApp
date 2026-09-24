@@ -3636,7 +3636,12 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             </button>
             <button
               onClick={() => client.formerCustomer
-                ? onUpdateWithLog(client.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted" }, "status", "Reinstated as customer")
+                // billingStatus only resets if it's stuck on marked-deletion — that
+                // value blocks the ChargeOver sync from ever auto-correcting it
+                // (see AUTO_BILLING_STATUSES), so a reinstated client would otherwise
+                // stay permanently flagged for deletion despite being active again.
+                // "never-charged" is IN that list, so the next sync classifies it for real.
+                ? onUpdateWithLog(client.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted", ...(client.billingStatus === "marked-deletion" ? { billingStatus: "never-charged" } : {}) }, "status", "Reinstated as customer")
                 : onUpdateWithLog(client.id, { formerCustomer: true, archivedClient: true, stage: "marked-deletion", workflowHidden: false }, "status", "No longer a customer — archived")}
               title={client.formerCustomer ? "Reinstate as a current customer" : "No longer a customer — archive this card"}
               style={footBtn(client.formerCustomer ? null : C.red)}>
@@ -4407,7 +4412,10 @@ function EmptyState({ onImport, onSample }) {
 function ArchivedPanel({ archived, onOpen, onUpdateWithLog }) {
   const list = useMemo(() => [...archived].sort((a, b) => (a.company || a.name || "").localeCompare(b.company || b.name || "")), [archived]);
   const restore = (c) => (c.formerCustomer
-    ? onUpdateWithLog(c.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted" }, "status", "Reinstated as customer")
+    // Same billingStatus fix as the client card's own Reinstate button — see
+    // its comment. Kept in sync manually since this panel builds the patch
+    // independently rather than sharing the card's handler.
+    ? onUpdateWithLog(c.id, { formerCustomer: false, archivedClient: false, stage: "not-contacted", ...(c.billingStatus === "marked-deletion" ? { billingStatus: "never-charged" } : {}) }, "status", "Reinstated as customer")
     : onUpdateWithLog(c.id, { archivedClient: false }, "archive", "Client restored"));
 
   if (!list.length) return <p style={{ fontSize: 13, color: C.sub }}>Nothing is archived. Archiving hides a client from the lists without deleting it.</p>;

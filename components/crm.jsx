@@ -1933,8 +1933,9 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
     e.preventDefault();
     onOpen(c.id);
   };
+  const look = useLook();
   return (
-    <div role="button" tabIndex={0} onClick={openInPage} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
+    <div role="button" tabIndex={0} onClick={openInPage} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${look.studio ? C.line : C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
       <div style={{ minWidth: 0 }}>
         <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
           <span style={{ width: 6, height: 6, borderRadius: rad(6), background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
@@ -2139,7 +2140,8 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
           right={<IconCircle dark icon="export" title="Export these clients as CSV" onClick={() => exportCsv(list)} />}>
           <div className="crm-table" style={{ overflow: "hidden", borderRadius: rad(14) }}>
             <div style={{ padding: "4px 16px 12px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>{headerCells}</div>
-            <div style={{ background: C.panel, color: C.ink, borderRadius: rad(14), overflow: "hidden", border: `1px solid ${alpha(C.line, 60)}` }}>
+            {/* Same light grey as the page frame, so the list reads as a window onto the page */}
+            <div style={{ background: C.paper, color: C.ink, borderRadius: rad(14), overflow: "hidden", border: `1px solid ${alpha(C.line, 60)}` }}>
               {rows}
               {list.length === 0 && <div style={{ padding: 36, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}
             </div>

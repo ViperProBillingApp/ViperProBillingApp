@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "../../../../lib/db.js";
 import { getSessionUser } from "../../../../lib/auth.js";
-import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap, findDuplicateChargeoverIds } from "../../../../lib/chargeover.js";
+import { coConfigured, fetchAllCustomers, mapCustomer, mergeCustomers, backfillRecurringAmounts, fetchOverdueMap, findDuplicateChargeoverIds, fetchActiveSubscriptionIds, applySubscriptionFlags } from "../../../../lib/chargeover.js";
 import { updateState } from "../../../../lib/clients.js";
 
 // Long-ish job; give it room (customer fetch + a bounded batch of invoice lookups).
@@ -13,7 +13,9 @@ async function runSync() {
   const customers = await fetchAllCustomers();
   const overdue = await fetchOverdueMap().catch(() => null); // best-effort; falls back to raw balance
   const mapped = customers.map(mapCustomer);
-  let added = 0, updated = 0, filled = 0, remaining = 0, finalClients = [];
+  // Best-effort: on failure the rotating backfill still refreshes its batch.
+  const activeSubs = await fetchActiveSubscriptionIds().catch(() => null);
+  let added = 0, updated = 0, filled = 0, remaining = 0, subsChanged = 0, finalClients = [];
   // Merge + backfill INSIDE updateState so it re-applies against fresh state if
   // a UI save lands during the sync — the merge no longer clobbers that save.
   const res = await updateState(db, async (state) => {
@@ -21,6 +23,8 @@ async function runSync() {
     added = merged.added; updated = merged.updated;
     const bf = await backfillRecurringAmounts(merged.clients);
     filled = bf.filled; remaining = bf.remaining;
+    // After the backfill so the full sweep has the last word for every card.
+    if (activeSubs) subsChanged = applySubscriptionFlags(merged.clients, activeSubs);
     finalClients = merged.clients; // only the value from the attempt that actually commits matters below
     return { clients: merged.clients, settings: state.settings || {} };
   });
@@ -31,7 +35,7 @@ async function runSync() {
   if (duplicateChargeoverIds.length) {
     console.error(`ChargeOver sync: ${duplicateChargeoverIds.length} chargeoverId(s) shared by more than one CRM card:`, JSON.stringify(duplicateChargeoverIds));
   }
-  return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining, duplicateChargeoverIds };
+  return { ok: true, customers: customers.length, added, updated, amountsFilled: filled, amountsRemaining: remaining, subscriptionsChecked: !!activeSubs, subscriptionsChanged: subsChanged, duplicateChargeoverIds };
 }
 
 // Nightly Vercel Cron — authenticated by the CRON_SECRET bearer Vercel injects.

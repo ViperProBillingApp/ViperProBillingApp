@@ -972,10 +972,10 @@ export default function CRM({ user }) {
               </div>
             </header>
 
-            <div style={{ marginTop: 18 }}>{staleBanner}{mailBanner}</div>
+            {(staleBanner || mailBanner) && <div style={{ marginTop: 14 }}>{staleBanner}{mailBanner}</div>}
 
             {/* Page header: back · big title + subtitle · tools · primary CTA */}
-            <div className="flex flex-wrap items-center justify-between" style={{ gap: 16, margin: "14px 0 24px" }}>
+            <div className="flex flex-wrap items-center justify-between" style={{ gap: 16, margin: "6px 0 22px" }}>
               <div className="flex items-center" style={{ gap: 16, minWidth: 0 }}>
                 {tab !== "digest" && <IconCircle icon="back" title="Back to Today" onClick={() => setTab("digest")} size={46} />}
                 <div style={{ minWidth: 0 }}>
@@ -1905,7 +1905,7 @@ function ContactLiveCell({ value, onChange, checkedAt }) {
 
 // One client row, memoized: with hundreds of clients, typing in the detail
 // drawer only re-renders the edited client's row instead of the whole table.
-const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, groupMaster, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
+const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCols, groupMaster, groupSub, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
   const behind = arrearsPeriods(c);
   const cur = c.currency || settings.currency;
   // A covered-by-group office's OWN billingStatus/stage only ever gets set
@@ -1925,7 +1925,9 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
   // were fixed, since that field was a separate miss. Read the group's real
   // subscription status, not a hardcoded true — if the group itself ever
   // loses its subscription, its offices should reflect that too.
-  const effCoHasSubscription = inheriting ? groupMaster.coHasSubscription : c.coHasSubscription;
+  const effCoHasSubscription = inheriting ? !!groupSub : c.coHasSubscription;
+  // A group card with no ChargeOver id of its own shows its offices' status.
+  const groupCardSub = !!(c.groupBillingMaster && c.officeGroup && !String(c.chargeoverId || "").trim());
   // Plain left-click opens the drawer in-page; right/cmd/middle-click on the
   // company-name link lets the browser open ?client=<id> in a new tab/window.
   const openInPage = (e) => {
@@ -1982,7 +1984,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
           <span style={{ fontSize: 12, fontWeight: 600, color: effCoHasSubscription ? C.green : C.faint }}>{effCoHasSubscription ? "Active Subscription" : "No Subscription"}</span>
         </div>
       ) : (
-        <BoolCell value={c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title="Subscription" />
+        <BoolCell value={groupCardSub ? !!groupSub : c.coHasSubscription} onChange={(v) => onUpdate(c.id, { coHasSubscription: v })} trueLabel="Active Subscription" falseLabel="No Subscription" title={groupCardSub ? "Subscription — from this group's offices in ChargeOver" : "Subscription"} />
       )}
       <ContactLiveCell value={c.contactLive} checkedAt={c.contactLiveCheckedAt} onChange={(v) => onUpdate(c.id, { contactLive: v, contactLiveCheckedAt: new Date().toISOString() })} />
       <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
@@ -2060,9 +2062,23 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
     for (const cl of clients) if (cl.groupBillingMaster && cl.officeGroup) m.set(cl.officeGroup, cl);
     return m;
   }, [clients]);
+  // A group's subscription is live if its card OR any of its offices has an
+  // active ChargeOver package. Reading the card alone showed "No Subscription"
+  // for every office of groups whose card has no ChargeOver id of its own
+  // (AIM, Destination Asia) — their packages sit on the individual offices.
+  const groupSubs = useMemo(() => {
+    const m = new Map();
+    for (const cl of clients) {
+      if (!cl.officeGroup || !cl.multiOffice) continue;
+      const live = !!(cl.chargeoverId && cl.coHasSubscription) || (cl.groupBillingMaster && !!cl.coHasSubscription);
+      m.set(cl.officeGroup, (m.get(cl.officeGroup) || false) || live);
+    }
+    return m;
+  }, [clients]);
   const effSubscription = (c) => {
     const master = c.officeGroup ? groupMasters.get(c.officeGroup) : null;
-    return master && coveredByGroup(c) ? master.coHasSubscription : c.coHasSubscription;
+    if (c.groupBillingMaster && c.officeGroup && !String(c.chargeoverId || "").trim()) return !!groupSubs.get(c.officeGroup);
+    return master && coveredByGroup(c) ? !!groupSubs.get(c.officeGroup) : c.coHasSubscription;
   };
   const list = useMemo(() => {
     let l = clients.filter((c) => (showArchived ? c.archivedClient : !c.archivedClient));
@@ -2088,7 +2104,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         (c.archivedContacts || []).some((a) => (a.email || "").toLowerCase().includes(k)));
     }
     return [...l].sort((a, b) => arrearsPeriods(b) - arrearsPeriods(a) || a.name.localeCompare(b.name));
-  }, [clients, groupMasters, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
+  }, [clients, groupMasters, groupSubs, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
   const gridCols = "1.2fr 0.85fr 0.7fr 0.9fr 0.85fr 0.9fr 0.9fr 40px";
   const headerCells = (
@@ -2105,7 +2121,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   );
   const rows = list.map((c) => (
     <ClientRow key={c.id} c={c} settings={settings} templates={templates} gridCols={gridCols}
-      groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null}
+      groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null} groupSub={c.officeGroup ? groupSubs.get(c.officeGroup) : false}
       onOpen={onOpen} onEmail={onEmail} onUpdate={onUpdate} onUpdateWithLog={onUpdateWithLog} />
   ));
   if (look.studio) {
@@ -2163,7 +2179,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
         </div>
         {list.map((c) => (
           <ClientRow key={c.id} c={c} settings={settings} templates={templates} gridCols={gridCols}
-            groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null}
+            groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null} groupSub={c.officeGroup ? groupSubs.get(c.officeGroup) : false}
             onOpen={onOpen} onEmail={onEmail} onUpdate={onUpdate} onUpdateWithLog={onUpdateWithLog} />
         ))}
         {list.length === 0 && <div style={{ padding: 32, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}
@@ -5644,7 +5660,8 @@ function DarkRow({ title, sub, status, figure, figureSub, selected, onClick, ini
       <span aria-hidden style={{ width: 40, height: 40, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700,
         background: selected ? "rgba(255,255,255,0.18)" : avatarBg || "rgba(152,182,224,0.16)", color: selected ? "#fff" : "#C9DAF1" }}>{initials}</span>
       <span style={{ minWidth: 0 }}>
-        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        {/* Logo periwinkle (the "er") — one of only two accent uses, both on dark navy where it reads */}
+        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, color: selected ? "#fff" : C.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
         {sub && <span style={{ display: "block", fontSize: 11.5, color: selected ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.55)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</span>}
       </span>
       {status ? (
@@ -5786,7 +5803,7 @@ function StudioStats({ clients, settings, bounced, replyCount, onFocus, onGo }) 
             <MenuIcon name="arrowUpRight" size={15} color="#fff" />
           </button>
         </div>
-        <div style={{ fontFamily: DISPLAY, fontSize: 32, fontWeight: 500, padding: "0 4px", lineHeight: 1.1 }}>{k.followUps + bounced + replyCount}</div>
+        <div style={{ fontFamily: DISPLAY, fontSize: 32, fontWeight: 500, padding: "0 4px", lineHeight: 1.1, color: C.accent }}>{k.followUps + bounced + replyCount}</div>
         <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.6)", padding: "2px 4px 0" }}>open items across the team</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: "auto", paddingTop: 14, alignItems: "end" }}>
           {[["Follow-ups", k.followUps, () => onFocus("follow-ups")], ["Replies", replyCount, () => onGo("replies"), true], ["Bounced", bounced, () => onFocus("bounced")]].map(([l, n, go, hi]) => (

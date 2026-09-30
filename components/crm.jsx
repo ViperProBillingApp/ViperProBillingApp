@@ -994,8 +994,9 @@ export default function CRM({ user }) {
               </div>
             </div>
 
-            <StudioStats clients={active} settings={settings} bounced={bounced.length} replyCount={replyN}
-              onFocus={(k) => { setFocus(k); setTab("clients"); }} onGo={setTab} />
+            {/* KPI cards on Today only — the other tabs start straight on their panel */}
+            {tab === "digest" && <StudioStats clients={active} settings={settings} bounced={bounced.length} replyCount={replyN}
+              onFocus={(k) => { setFocus(k); setTab("clients"); }} onGo={setTab} />}
             {tabBody}
             <div style={{ marginTop: 26 }}>{footer}</div>
           </div>

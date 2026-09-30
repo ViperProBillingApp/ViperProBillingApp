@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import Papa from "papaparse";
-import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
+import { C, T, SANS, DISPLAY, MONO, Wordmark, rad, alpha, THEMES, DEFAULT_THEME, themeInfo, applyTheme, currentTheme } from "../lib/brand.js";
 import { SYMBOL, CADENCE, coveredByGroup, lastPaymentDate, periodsBehind, owedBalance, arrearsPeriods, totalOwed, needsReminder, monthlyValue, followUpDue, needsFollowUp, computeKpis, topOwed, csvSafe, csvSafeRow, owesNow, contributesMrr, isNotUpToDate } from "../lib/metrics.js";
 import UsersAdmin from "./users-admin.jsx";
 
@@ -33,17 +33,17 @@ const KNOWN_CO_DUPLICATE_IDS = {
 };
 
 const SEGMENTS = {
-  "viper-current": { label: "Viper Customer", color: "#0E766E" },
-  "viper-past": { label: "Past Viper Customer", color: "#8A94A6" },
-  "viper-maritz": { label: "Viper & Maritz Customer", color: "#7A5AA6" }, // Viper customer with free Maritz portal — only viper pricing applies
-  "maritz-portal": { label: "Maritz - Viper Portal", color: "#3B5BA5" },
+  "viper-current": { label: "Viper Customer", color: C.catTeal },
+  "viper-past": { label: "Past Viper Customer", color: C.catSlate },
+  "viper-maritz": { label: "Viper & Maritz Customer", color: C.catPlum }, // Viper customer with free Maritz portal — only viper pricing applies
+  "maritz-portal": { label: "Maritz - Viper Portal", color: C.catBlue },
 };
 const SEGMENTS_ALPHA = alphaKeys(SEGMENTS);
 const BILLING = {
   "current-pricing": { label: "Up to date · current pricing", color: C.green, bg: C.greenBg },
   "old-pricing": { label: "Up to date · old pricing", color: C.amber, bg: C.amberBg },
   "not-up-to-date": { label: "Not up to date", color: C.red, bg: C.redBg },
-  "needs-co-update": { label: "Need to update in ChargeOver", color: "#3B5BA5", bg: "#E7EDF8" },
+  "needs-co-update": { label: "Need to update in ChargeOver", color: C.catBlue, bg: C.accentSoft },
   "never-charged": { label: "Never charged", color: C.grey, bg: C.greyBg },
   "payment-failed": { label: "Payment failed", color: C.red, bg: C.redBg },
   "no-payment-method": { label: "No payment method", color: C.amber, bg: C.amberBg },
@@ -53,12 +53,12 @@ const BILLING = {
 };
 const BILLING_ALPHA = alphaKeys(BILLING);
 const STAGES = {
-  "not-contacted": { label: "Not contacted", color: "#8A94A6", order: 0 },
+  "not-contacted": { label: "Not contacted", color: C.catSlate, order: 0 },
   "need-to-contact": { label: "Need to contact", color: C.amber, order: 1 },
-  "contacted-awaiting": { label: "Contacted · awaiting reply", color: "#3B5BA5", order: 2 },
-  "replied": { label: "Replied · needs action", color: "#8A5CD1", order: 2.5 },
+  "contacted-awaiting": { label: "Contacted · awaiting reply", color: C.catBlue, order: 2 },
+  "replied": { label: "Replied · needs action", color: C.catLilac, order: 2.5 },
   "up-to-date": { label: "Up to date", color: C.green, order: 3 },
-  "on-hold": { label: "On hold", color: "#7A4FB5", order: 4 },
+  "on-hold": { label: "On hold", color: C.catViolet, order: 4 },
   "marked-deletion": { label: "Marked for Suspension", color: C.red, order: 5 },
 };
 // Business/funnel order — drives the Workflow board's kanban columns and the
@@ -69,10 +69,10 @@ const STAGES_ALPHA = alphaKeys(STAGES);
 // Tasks board (Workflow tab): lanes, category labels, and the account-edit flag
 // that also shows on client cards (mirrors the red/green Maritz-edit workflow).
 const TASK_LANES = [["todo", "To do"], ["doing", "In progress"], ["waiting", "Waiting on"], ["done", "Done"]];
-const LANE_COLOR = { todo: "#8A94A6", doing: "#3B5BA5", waiting: C.amber, done: C.green };
+const LANE_COLOR = { todo: C.catSlate, doing: C.catBlue, waiting: C.amber, done: C.green };
 const TASK_LABELS = {
-  campaign: { label: "Campaign", fg: C.action, bg: "#E7EDF8" },
-  data: { label: "Data ops", fg: "#6D5BA6", bg: "#EEEBF7" },
+  campaign: { label: "Campaign", fg: C.action, bg: C.accentSoft },
+  data: { label: "Data ops", fg: C.catPlum, bg: alpha(C.catPlum, 14) },
   outreach: { label: "Custom outreach", fg: C.amber, bg: C.amberBg },
   onboarding: { label: "Onboarding", fg: C.green, bg: C.greenBg },
 };
@@ -91,9 +91,9 @@ const CLIENT_FLAGS_ALPHA = alphaKeys(CLIENT_FLAGS);
 // dropdowns alpha" convention) — colors match the equivalent Client/segment
 // badges (viper-current/viper-maritz/maritz-portal) for at-a-glance continuity.
 const CUSTOMER_KIND = {
-  maritz: { label: "Maritz Portal", color: "#3B5BA5" },
-  viper: { label: "Viper", color: "#0E766E" },
-  both: { label: "Maritz & Viper", color: "#7A5AA6" },
+  maritz: { label: "Maritz Portal", color: C.catBlue },
+  viper: { label: "Viper", color: C.catTeal },
+  both: { label: "Maritz & Viper", color: C.catPlum },
   none: { label: "Neither", color: C.faint },
 };
 const CUSTOMER_ORDER = ["maritz", "viper", "both", "none"];
@@ -124,7 +124,7 @@ function Avatar({ email, staffByEmail = {}, size = 20 }) {
   if (!email) return null;
   const name = staffByEmail[email] || email;
   return (
-    <span title={name} style={{ width: size, height: size, borderRadius: "50%", background: "#E7EDF8", color: C.action, fontSize: size * 0.5, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+    <span title={name} style={{ width: size, height: size, borderRadius: "50%", background: C.accentSoft, color: C.action, fontSize: size * 0.5, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
       {initialsOf(name)}
     </span>
   );
@@ -136,11 +136,11 @@ const TAGS = {
   "price-pending": { label: "Price increase: pending", color: C.amber },
   "price-accepted": { label: "Price increase: accepted", color: C.green },
   "price-declined": { label: "Price increase: declined", color: C.red },
-  "grandfathered": { label: "Grandfathered pricing", color: "#3B5BA5" },
-  "vip": { label: "VIP / key account", color: "#7A4FB5" },
+  "grandfathered": { label: "Grandfathered pricing", color: C.catBlue },
+  "vip": { label: "VIP / key account", color: C.catViolet },
   "renewal-soon": { label: "Renewal approaching", color: C.amber },
-  "contact-found": { label: "New contact found · review", color: "#0E766E" },
-  "payment-plan": { label: "On payment plan", color: "#3B5BA5" },
+  "contact-found": { label: "New contact found · review", color: C.catTeal },
+  "payment-plan": { label: "On payment plan", color: C.catBlue },
   "disputed": { label: "Disputed charge", color: C.red },
 };
 /* ----------------------------- Helpers ----------------------------- */
@@ -443,6 +443,16 @@ function exportCsv(clients) {
 }
 
 /* =============================== App =============================== */
+// Studio page header copy, per main tab.
+const TAB_META = {
+  digest: ["Today", "What needs your attention across every client, at a glance."],
+  clients: ["Clients", "Search, filter and update every client card in one place."],
+  workflow: ["Workflow", "Move clients through the chase and keep team tasks moving."],
+  comms: ["Emails", "Work the reminder queue, run campaigns and review what went out."],
+  replies: ["Replies", "Client replies from the accounting inbox, matched to their cards."],
+  recovery: ["Contact recovery", "Find and approve new contacts for bounced email addresses."],
+};
+
 export default function CRM({ user }) {
   const [clients, setClients] = useState([]);
   const [settings, setSettings] = useState({
@@ -463,6 +473,13 @@ export default function CRM({ user }) {
   const [composeId, setComposeId] = useState(null);
   const [composeType, setComposeType] = useState("reminder");
   const [toast, setToast] = useState("");
+  // Active look (lib/brand.js THEMES). The attribute on <html> is already set
+  // before paint by the boot script in layout.jsx; this mirrors it so the
+  // layout can branch, and changeLook persists a new pick for this browser.
+  const [look, setLook] = useState(DEFAULT_THEME);
+  useEffect(() => { setLook(currentTheme()); }, []);
+  const changeLook = useCallback((id) => { applyTheme(id); setLook(id); }, []);
+  const lookValue = useMemo(() => { const t = themeInfo(look); return { id: look, studio: t.layout === "studio", dark: t.dark }; }, [look]);
 
   // Gmail reply inbox: unhandled + unmatched reply queues, and a poll loop that
   // keeps them fresh while the app is open.
@@ -835,103 +852,22 @@ export default function CRM({ user }) {
   const detail = clients.find((c) => c.id === detailId);
   const compose = clients.find((c) => c.id === composeId);
 
-  return (
-    // Page background: blue smoke art under a white wash to lighten it, fixed
-    // so the glass panes' backdrop blur has something to refract as you scroll.
-    <div className="crm-root" style={{
-      backgroundColor: C.paper,
-      backgroundImage: "linear-gradient(rgba(255,255,255,0.6), rgba(255,255,255,0.6)), url(/page-bg.jpg)",
-      backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed",
-      minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
-      {/* Phone-only top bar: wordmark + hamburger. Hidden on desktop (globals.css).
-          The menu itself is the same aside, shown as a full-screen sheet when open. */}
-      <div className="crm-mobilebar">
-        <Wordmark size={22} />
-        <button onClick={() => setMenuOpen((o) => !o)} aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen}
-          style={{ background: "none", border: "none", cursor: "pointer", padding: 8, margin: -8, color: C.ink, display: "inline-flex" }}>
-          {menuOpen
-            ? <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>}
-        </button>
-      </div>
-      {/* Left navigation panel — hidden behind the hamburger under 768px (see globals.css) */}
-      {/* No surface of its own: no photo, no glass, no shadow. The page
-          background reads straight through and the items sit directly on it. */}
-      <aside className={`crm-aside${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen(false)}
-        style={{ width: 194, flexShrink: 0,
-        padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3,
-        // stays put as you scroll; scrolls itself if the viewport is too short
-        position: "sticky", top: 14, height: "calc(100vh - 28px)", overflowY: "auto",
-        margin: "14px 0 14px 10px" }}>
-        <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
-        <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
-        <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
-        <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
-        <MenuItem icon="pricing" onClick={() => setModal("pricing")}>Pricing</MenuItem>
-        <MenuItem icon="portal" onClick={() => setModal("viper")}>Viper Customers</MenuItem>
-        <MenuItem icon="reports" onClick={() => setModal("reports")}>Reports</MenuItem>
-        <MenuItem icon="onboarding" onClick={() => setModal("onboarding")}>Maritz Onboarding</MenuItem>
-        <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
-        {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
-        <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
-        {/* The blue wash this used to sit on is gone — dark text, faint rule */}
-        <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
-          <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
-          <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
-        </div>
-      </aside>
-
-      <main style={{ flex: 1, minWidth: 0 }}>
-      <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
-        {saveState === "stale" && (
-          <div className="flex items-center justify-between" style={{ gap: 12, background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+  const staleBanner = saveState === "stale" && (
+          <div className="flex items-center justify-between" style={{ gap: 12, background: C.redBg, border: `1px solid ${alpha(C.red, 20)}`, borderRadius: rad(10), padding: "10px 14px", marginBottom: 14 }}>
             <span style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
               This tab is out of date. The data changed elsewhere (another tab, a sync, or a bounce webhook), so changes here are not being saved.
             </span>
-            <button onClick={() => window.location.reload()} style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: 8, padding: "7px 14px", cursor: "pointer" }}>
+            <button onClick={() => window.location.reload()} style={{ flexShrink: 0, fontSize: 12.5, fontWeight: 600, color: "#fff", background: C.red, border: "none", borderRadius: rad(8), padding: "7px 14px", cursor: "pointer" }}>
               Reload latest
             </button>
           </div>
-        )}
-
-        {/* Metrics box + tab row share one continuous board-gradient background (no gap
-            between them); the metrics keep their original boxed padding. */}
-        <div style={{ background: C.boardGradient, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
-          <div style={{ padding: "14px 16px 4px" }}>
-            <header style={{ marginBottom: 12 }}>
-              <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em", color: "#fff" }}>Client Billing CRM</h1>
-              {sync.msg && <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.78)", marginTop: 8 }}>{sync.msg}</p>}
-            </header>
-            <StatStrip clients={active} settings={settings} bounced={bounced.length}
-              onFocus={(k) => { setFocus(k); setTab("clients"); }} />
-          </div>
-          {/* Tab row — actions live on the same line, right-aligned. Inline
-              display so the right-alignment holds even if the .flex utility
-              class isn't emitted by the CSS build. */}
-          <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
-            {[["digest", "Today", "today"], ["clients", "Clients", "users"], ["workflow", "Workflow", "workflow"], ["comms", "Emails", "mail"],
-              ["replies", `Replies${replies.length + unmatched.length ? ` · ${replies.length + unmatched.length}` : ""}`, "replies"]].map(([k, t, ic]) => (
-              <Tab key={k} icon={ic} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
-            ))}
-            <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
-              <MiniBtn small icon="import" onClick={() => setModal("import")}>Import CSV</MiniBtn>
-              <MiniBtn small icon="archive" onClick={() => setModal("archived")}>Archived{archived.length ? ` · ${archived.length}` : ""}</MiniBtn>
-              <MiniBtn small icon="trash" onClick={() => setModal("deleted")}>Deleted</MiniBtn>
-              <MiniBtn small icon="export" onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
-              <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
-                {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
-              </span>
-            </div>
-          </nav>
-        </div>
-
-        {mailErr && (
-          <div style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.red, fontWeight: 600 }}>
-            {mailErr}
-          </div>
-        )}
-
-        {clients.length === 0 ? (
+  );
+  const mailBanner = mailErr && (
+    <div style={{ background: C.redBg, border: `1px solid ${alpha(C.red, 20)}`, borderRadius: rad(10), padding: "10px 14px", marginBottom: 14, fontSize: 13, color: C.red, fontWeight: 600 }}>
+      {mailErr}
+    </div>
+  );
+  const tabBody = clients.length === 0 ? (
           <EmptyState onImport={() => setModal("import")} onSample={() => addClients(SAMPLE)} />
         ) : (
           <>
@@ -940,11 +876,12 @@ export default function CRM({ user }) {
             {tab === "workflow" && <WorkflowTab clients={clients.filter((c) => !c.archivedClient || c.stage === "marked-deletion")} allClients={clients} user={user} onOpen={setDetailId} onStage={(id, stage) => updateWithLog(id, { stage }, "stage", `Stage → ${STAGES[stage].label}`)} onUpdate={update} />}
             {tab === "recovery" && <RecoveryTab bounced={recoverable} onApply={applyContact} onUpdate={update} onOpen={setDetailId} />}
             {tab === "comms" && <CommsTab clients={active} settings={settings} templates={templates} onLogSent={logSent} onOpen={setDetailId} onSent={showToast} signatureImage={signatureImage} onUpdateWithLog={updateWithLog} onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} />}
-            {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} replyCount={replies.length + unmatched.length} onGo={setTab} onOpen={setDetailId} />}
+            {tab === "digest" && <DigestTab clients={active} settings={settings} bounced={bounced.length} replyCount={replies.length + unmatched.length} onGo={setTab} onOpen={setDetailId} onEmail={openCompose} />}
             {tab === "replies" && <RepliesTab replies={replies} unmatched={unmatched} clients={clients} templates={templates} settings={settings} signatureImage={signatureImage} onOpen={setDetailId} onRefresh={loadReplies} />}
           </>
-        )}
-
+        );
+  const footer = (
+    <>
         <p style={{ color: C.faint, fontSize: 12, marginTop: 16, lineHeight: 1.5 }}>
           Billing status and payments sync from ChargeOver in production (match key: ChargeOver ID, falling back to email).
           Reminders escalate automatically with periods behind. Export to CSV regularly for a spreadsheet copy.
@@ -952,9 +889,10 @@ export default function CRM({ user }) {
         <p style={{ color: C.faint, fontSize: 11.5, marginTop: 10, paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
           © 2026 ViperPro · VIP Event Resources · Software solutions for DMCs and the Meetings & Events industry · sales@vipeventresources.com · +1 435 901 2634
         </p>
-      </div>
-      </main>
-
+    </>
+  );
+  const overlays = (
+    <>
       {detail && <DetailDrawer key={detail.id} client={detail} settings={settings} onClose={() => setDetailId(null)} onUpdate={update} onUpdateWithLog={updateWithLog} onRecordPayment={recordPayment} onDelete={(id) => { setClients((p) => p.filter((c) => c.id !== id)); setDetailId(null); }}
         onDeleteAny={(id) => { setClients((p) => p.filter((c) => c.id !== id)); if (detailId === id) setDetailId(null); }}
         onUpdateSettings={(patch) => setSettings((s) => ({ ...s, ...patch }))} currentUser={user}
@@ -975,17 +913,199 @@ export default function CRM({ user }) {
       {modal === "reports" && <Modal wide title="Reports" onClose={() => setModal(null)}><ReportsTab clients={active} settings={settings} onOpen={(id) => { setModal(null); setDetailId(id); }} /></Modal>}
       {modal === "users" && <Modal wide title={user.role === "admin" ? "User management" : "My account"} onClose={() => setModal(null)}><UsersAdmin me={user} embedded /></Modal>}
       {toast && (
-        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: 10, boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: C.ink, color: "#fff", fontSize: 13.5, fontWeight: 600, padding: "12px 20px", borderRadius: rad(10), boxShadow: "0 12px 32px rgba(34,48,76,0.35)", zIndex: 100 }}>
           ✓ {toast}
         </div>
       )}
-    </div>
+    </>
+  );
+  const saveLabel = saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : "";
+
+  if (lookValue.studio) {
+    const replyN = replies.length + unmatched.length;
+    const [pageTitle, pageSub] = TAB_META[tab] || TAB_META.digest;
+    const navItems = [["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"], ["replies", "Replies", replyN], ["recovery", "Recovery", bounced.length]];
+    const chaseN = active.filter((c) => needsFollowUp(c)).length;
+    return (
+      <LookCtx.Provider value={lookValue}>
+      <div className="st-root" style={{ minHeight: "100dvh", background: T.pageBg, backgroundAttachment: "fixed", fontFamily: SANS, color: C.ink, padding: "clamp(0px, 1.1vw, 16px)" }}>
+        <div className="st-frame" style={{ background: C.paper, borderRadius: rad(18), minHeight: "calc(100dvh - 2 * clamp(0px, 1.1vw, 16px))",
+          boxShadow: lookValue.dark ? "0 0 0 1px rgba(255,255,255,0.07), 0 40px 90px -30px rgba(0,0,0,0.85)" : "0 0 0 1px rgba(22,33,58,0.05), 0 40px 90px -45px rgba(22,33,58,0.45)" }}>
+          <div className="mx-auto w-full" style={{ maxWidth: 1380, padding: "clamp(14px, 2vw, 26px) clamp(14px, 2.6vw, 34px) 30px" }}>
+            {/* Top bar: logo + count badge · dark pill navigation · round tools */}
+            <header className="st-topbar" style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+              <div className="flex items-center" style={{ gap: 14, flexShrink: 0 }}>
+                <Wordmark size={19} reversed={lookValue.dark} />
+                <span title={`${chaseN} clients need a follow-up`} style={{ width: 42, height: 42, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.panel, boxShadow: T.shCard,
+                  display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600, color: C.ink }}>{chaseN}</span>
+              </div>
+              <nav className="st-nav" aria-label="Main" style={{ display: "flex", alignItems: "center", gap: 2, background: C.brand, borderRadius: 999, padding: 5,
+                margin: "0 auto", flexShrink: 1, minWidth: 0, boxShadow: lookValue.dark ? "0 0 0 1px rgba(255,255,255,0.08)" : "0 14px 30px -18px rgba(22,33,58,0.6)", maxWidth: "100%", overflowX: "auto" }}>
+                {navItems.map(([k, label, n]) => {
+                  const on = tab === k;
+                  return (
+                    <button key={k} onClick={() => setTab(k)} aria-current={on ? "page" : undefined}
+                      onMouseEnter={(e) => { if (!on) e.currentTarget.style.color = "#fff"; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.color = "rgba(255,255,255,0.72)"; }}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 999, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+                        fontSize: 13.5, fontWeight: 600, background: on ? C.action : "transparent", color: on ? "#fff" : "rgba(255,255,255,0.72)",
+                        boxShadow: on ? "0 8px 20px -10px rgba(0,0,0,0.6)" : "none", transition: "color 0.12s, background 0.12s" }}>
+                      {on && <span aria-hidden style={{ fontSize: 10, color: C.accent }}>✦</span>}
+                      {label}
+                      {n > 0 && <span style={{ minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        background: on ? "#fff" : "rgba(255,255,255,0.14)", color: on ? C.action : "#fff" }}>{n}</span>}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="st-tools flex items-center" style={{ gap: 7, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }}>
+                <IconCircle icon="mail" title="Email templates" onClick={() => setModal("emails")} />
+                <IconCircle icon="pricing" title="Pricing" onClick={() => setModal("pricing")} />
+                <IconCircle icon="portal" title="Viper Customers — portal logins" onClick={() => setModal("viper")} />
+                <IconCircle icon="reports" title="Reports" onClick={() => setModal("reports")} />
+                <IconCircle icon="onboarding" title="Maritz Onboarding" onClick={() => setModal("onboarding")} />
+                {user.role === "admin" && <IconCircle icon="sync" title={sync.busy ? "Syncing ChargeOver…" : "Sync ChargeOver"} onClick={syncNow} active={sync.busy} />}
+                <span aria-hidden style={{ width: 1, height: 26, background: C.line, margin: "0 4px" }} />
+                <IconCircle icon="bell" title={mailErr ? mailErr : replyN ? `${replyN} client replies waiting` : "No new replies"} onClick={() => setTab("replies")} dot={!!mailErr || replyN > 0} />
+                <LookSwitcher look={look} onChange={changeLook} />
+                <IconCircle icon="settings" title="Settings" onClick={() => setModal("settings")} />
+                <UserMenu user={user} onAccount={() => setModal("users")} onLogout={logout} />
+              </div>
+            </header>
+
+            <div style={{ marginTop: 18 }}>{staleBanner}{mailBanner}</div>
+
+            {/* Page header: back · big title + subtitle · tools · primary CTA */}
+            <div className="flex flex-wrap items-center justify-between" style={{ gap: 16, margin: "14px 0 24px" }}>
+              <div className="flex items-center" style={{ gap: 16, minWidth: 0 }}>
+                {tab !== "digest" && <IconCircle icon="back" title="Back to Today" onClick={() => setTab("digest")} size={46} />}
+                <div style={{ minWidth: 0 }}>
+                  <h1 style={{ fontFamily: DISPLAY, fontSize: "clamp(30px, 3.3vw, 42px)", fontWeight: 500, letterSpacing: "-0.015em", lineHeight: 1.05, color: C.ink }}>{pageTitle}</h1>
+                  <p style={{ fontSize: 14, color: C.faint, marginTop: 7 }}>{pageSub}</p>
+                  {sync.msg && <p style={{ fontSize: 12.5, color: C.sub, marginTop: 6, maxWidth: 760 }}>{sync.msg}</p>}
+                </div>
+              </div>
+              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 52, textAlign: "right" }}>{saveLabel}</span>
+                <IconCircle icon="import" title="Import CSV" onClick={() => setModal("import")} />
+                <IconCircle icon="export" title="Export CSV" onClick={() => exportCsv(active)} />
+                <IconCircle icon="archive" title={`Archived clients${archived.length ? ` (${archived.length})` : ""}`} onClick={() => setModal("archived")} badge={0} />
+                <IconCircle icon="trash" title="Deleted clients" onClick={() => setModal("deleted")} />
+                <PillCTA onClick={() => setModal("add")}>Add a client</PillCTA>
+              </div>
+            </div>
+
+            <StudioStats clients={active} settings={settings} bounced={bounced.length} replyCount={replyN}
+              onFocus={(k) => { setFocus(k); setTab("clients"); }} onGo={setTab} />
+            {tabBody}
+            <div style={{ marginTop: 26 }}>{footer}</div>
+          </div>
+        </div>
+        {overlays}
+      </div>
+      </LookCtx.Provider>
+    );
+  }
+
+  // Page background: blue smoke art under a white wash to lighten it, fixed
+  // so the glass panes' backdrop blur has something to refract as you scroll.
+  return (
+    <LookCtx.Provider value={lookValue}>
+      <div className="crm-root" style={{
+        backgroundColor: C.paper,
+        backgroundImage: "linear-gradient(rgba(255,255,255,0.6), rgba(255,255,255,0.6)), url(/page-bg.jpg)",
+        backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed",
+        minHeight: "100dvh", fontFamily: SANS, color: C.ink, display: "flex" }}>
+        {/* Phone-only top bar: wordmark + hamburger. Hidden on desktop (globals.css).
+            The menu itself is the same aside, shown as a full-screen sheet when open. */}
+        <div className="crm-mobilebar">
+          <Wordmark size={22} />
+          <button onClick={() => setMenuOpen((o) => !o)} aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 8, margin: -8, color: C.ink, display: "inline-flex" }}>
+            {menuOpen
+              ? <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              : <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>}
+          </button>
+        </div>
+        {/* Left navigation panel — hidden behind the hamburger under 768px (see globals.css) */}
+        {/* No surface of its own: no photo, no glass, no shadow. The page
+            background reads straight through and the items sit directly on it. */}
+        <aside className={`crm-aside${menuOpen ? " open" : ""}`} onClick={() => setMenuOpen(false)}
+          style={{ width: 194, flexShrink: 0,
+          padding: "22px 12px", display: "flex", flexDirection: "column", gap: 3,
+          // stays put as you scroll; scrolls itself if the viewport is too short
+          position: "sticky", top: 14, height: "calc(100vh - 28px)", overflowY: "auto",
+          margin: "14px 0 14px 10px" }}>
+          <div style={{ display: "flex", justifyContent: "center", padding: "2px 6px 22px" }}><Wordmark size={27} /></div>
+          <MenuItem icon="add" onClick={() => setModal("add")}>Add client</MenuItem>
+          <MenuItem icon="recovery" onClick={() => setTab("recovery")} active={tab === "recovery"}>{`Contact recovery${bounced.length ? ` · ${bounced.length}` : ""}`}</MenuItem>
+          <MenuItem icon="mail" onClick={() => setModal("emails")}>Email templates</MenuItem>
+          <MenuItem icon="pricing" onClick={() => setModal("pricing")}>Pricing</MenuItem>
+          <MenuItem icon="portal" onClick={() => setModal("viper")}>Viper Customers</MenuItem>
+          <MenuItem icon="reports" onClick={() => setModal("reports")}>Reports</MenuItem>
+          <MenuItem icon="onboarding" onClick={() => setModal("onboarding")}>Maritz Onboarding</MenuItem>
+          <MenuItem icon="settings" onClick={() => setModal("settings")}>Settings</MenuItem>
+          {user.role === "admin" && <MenuItem icon="sync" onClick={syncNow}>{sync.busy ? "Syncing…" : "Sync ChargeOver"}</MenuItem>}
+          <MenuItem icon="users" onClick={() => setModal("users")}>{user.role === "admin" ? "Users" : "My account"}</MenuItem>
+          <LookSwitcher look={look} onChange={changeLook} variant="menu" />
+          {/* The blue wash this used to sit on is gone — dark text, faint rule */}
+          <div className="crm-aside-footer" style={{ marginTop: "auto", paddingTop: 12, borderTop: `1px solid ${C.line}` }}>
+            <div style={{ fontSize: 12, color: C.sub, padding: "0 6px 6px" }}>{user.name || user.email}</div>
+            <MenuItem icon="signout" onClick={logout}>Sign out</MenuItem>
+          </div>
+        </aside>
+
+        <main style={{ flex: 1, minWidth: 0 }}>
+        <div className="mx-auto w-full" style={{ maxWidth: 1180, padding: "clamp(16px, 3vw, 30px)" }}>
+          {staleBanner}
+
+          {/* Metrics box + tab row share one continuous board-gradient background (no gap
+              between them); the metrics keep their original boxed padding. */}
+          <div style={{ background: C.boardGradient, borderRadius: "12px 12px 0 0", marginBottom: 16, overflow: "hidden" }}>
+            <div style={{ padding: "14px 16px 4px" }}>
+              <header style={{ marginBottom: 12 }}>
+                <h1 style={{ fontFamily: DISPLAY, fontSize: 20, fontWeight: 600, letterSpacing: "0.01em", color: "#fff" }}>Client Billing CRM</h1>
+                {sync.msg && <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.78)", marginTop: 8 }}>{sync.msg}</p>}
+              </header>
+              <StatStrip clients={active} settings={settings} bounced={bounced.length}
+                onFocus={(k) => { setFocus(k); setTab("clients"); }} />
+            </div>
+            {/* Tab row — actions live on the same line, right-aligned. Inline
+                display so the right-alignment holds even if the .flex utility
+                class isn't emitted by the CSS build. */}
+            <nav className="flex items-end" style={{ display: "flex", alignItems: "flex-end", gap: 3, flexWrap: "wrap", padding: "0 12px" }}>
+              {[["digest", "Today", "today"], ["clients", "Clients", "users"], ["workflow", "Workflow", "workflow"], ["comms", "Emails", "mail"],
+                ["replies", `Replies${replies.length + unmatched.length ? ` · ${replies.length + unmatched.length}` : ""}`, "replies"]].map(([k, t, ic]) => (
+                <Tab key={k} icon={ic} active={tab === k} onClick={() => setTab(k)}>{t}</Tab>
+              ))}
+              <div className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto", paddingBottom: 6 }}>
+                <MiniBtn small icon="import" onClick={() => setModal("import")}>Import CSV</MiniBtn>
+                <MiniBtn small icon="archive" onClick={() => setModal("archived")}>Archived{archived.length ? ` · ${archived.length}` : ""}</MiniBtn>
+                <MiniBtn small icon="trash" onClick={() => setModal("deleted")}>Deleted</MiniBtn>
+                <MiniBtn small icon="export" onClick={() => exportCsv(active)}>Export CSV</MiniBtn>
+                <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? "#FFB4AD" : "rgba(255,255,255,0.78)", minWidth: 56, textAlign: "right" }}>
+                  {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Save failed" : saveState === "stale" ? "Not saving" : ""}
+                </span>
+              </div>
+            </nav>
+          </div>
+
+          {mailBanner}
+
+          {tabBody}
+
+          {footer}
+        </div>
+        </main>
+
+        {overlays}
+      </div>
+    </LookCtx.Provider>
   );
 }
 
 // Brand-blue glyphs — left-menu headings, tab rows, metric blocks.
 function MenuIcon({ name, color, size = 21 }) {
-  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: color, strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0 } };
+  const p = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", style: { flexShrink: 0, color } };
   switch (name) {
     case "add": return <svg {...p}><path d="M12 5v14M5 12h14" /></svg>;
     case "recovery": return <svg {...p}><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" /></svg>;
@@ -995,7 +1115,7 @@ function MenuIcon({ name, color, size = 21 }) {
     case "users": return <svg {...p}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>;
     case "signout": return <svg {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>;
     case "onboarding": return <svg {...p}><path d="M9 2h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2V3a1 1 0 0 1 1-1z" /><path d="M9 12l2 2 4-4" /></svg>;
-    case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill={color} stroke="none" /></svg>;
+    case "pricing": return <svg {...p}><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" /><circle cx="7" cy="7" r="1.2" fill="currentColor" stroke="none" /></svg>;
     case "portal": return <svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M7 6.5h.01" /><path d="M8 14h5" /></svg>;
     case "reports": return <svg {...p}><path d="M3 21h18" /><path d="M6 21V11M11 21V4M16 21v-7M21 21V8" /></svg>;
     // tab-row glyphs
@@ -1015,6 +1135,17 @@ function MenuIcon({ name, color, size = 21 }) {
     case "export": return <svg {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M17 8l-5-5-5 5M12 3v12" /></svg>;
     case "archive": return <svg {...p}><rect x="2" y="3" width="20" height="5" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></svg>;
     case "trash": return <svg {...p}><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>;
+    // Studio look glyphs
+    case "look": return <svg {...p}><path d="M12 22a10 10 0 1 1 10-10c0 2.5-2 3.5-4 3.5h-2.2a1.8 1.8 0 0 0-1.3 3.1A1.8 1.8 0 0 1 12 22z" /><circle cx="7.5" cy="11" r="1.1" fill="currentColor" stroke="none" /><circle cx="10.5" cy="7" r="1.1" fill="currentColor" stroke="none" /><circle cx="15.5" cy="7.5" r="1.1" fill="currentColor" stroke="none" /></svg>;
+    case "moon": return <svg {...p}><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>;
+    case "sun": return <svg {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>;
+    case "search": return <svg {...p}><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>;
+    case "clock": return <svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
+    case "arrowUpRight": return <svg {...p}><path d="M7 17L17 7M8 7h9v9" /></svg>;
+    case "back": return <svg {...p}><path d="M19 12H5M12 19l-7-7 7-7" /></svg>;
+    case "filter": return <svg {...p}><path d="M4 6h16M7 12h10M10 18h4" /></svg>;
+    case "more": return <svg {...p}><circle cx="5" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.3" fill="currentColor" stroke="none" /></svg>;
+    case "link": return <svg {...p}><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>;
     default: return null;
   }
 }
@@ -1025,7 +1156,7 @@ function MenuItem({ onClick, active, icon, children }) {
       onClick={onClick}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = C.lineSoft; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
-      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: 8, padding: "9px 10px", cursor: "pointer" }}
+      style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", fontSize: 13.5, fontWeight: 600, color: active ? C.action : C.ink, background: active ? C.lineSoft : "transparent", border: "none", borderRadius: rad(8), padding: "9px 10px", cursor: "pointer" }}
     >
       {icon && <MenuIcon name={icon} color={C.action} />}
       {/* Multi-word labels break at the first space so every item is at most two
@@ -1063,10 +1194,10 @@ function MaritzOnboarding() {
       </p>
       <ol style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 10 }}>
         {ONBOARDING_STEPS.map((s, i) => (
-          <li key={i} className="flex" style={{ gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "12px 14px" }}>
+          <li key={i} className="flex" style={{ gap: 12, background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(10), padding: "12px 14px" }}>
             <span style={{ flexShrink: 0, width: 24, height: 24, borderRadius: "50%", background: C.action, color: "#fff", fontSize: 12.5, fontWeight: 700, fontFamily: MONO, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</span>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.02em", color: "#3B5BA5", marginBottom: 3 }}>{s.where}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.02em", color: C.catBlue, marginBottom: 3 }}>{s.where}</div>
               <div style={{ fontSize: 13.5, color: C.ink, lineHeight: 1.5 }}>{s.text}</div>
               {s.subs && (
                 <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "flex", flexDirection: "column", gap: 5 }}>
@@ -1160,6 +1291,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
   // messageRows: override the message textarea's height — the compose modal
   // passes a much larger value so a normal chase email is fully visible
   // without scrolling inside the small box the default row counts give it.
+  const look = useLook();
   const inp = compact ? { ...inputStyle, padding: "6px 9px", fontSize: 12.5 } : inputStyle;
   const monoSize = compact ? 12 : 13;
   const subC = dark ? "rgba(255,255,255,0.85)" : C.sub;
@@ -1244,8 +1376,11 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
       onDone?.();
     } catch { setSend({ busy: false, err: "Send failed — try again." }); }
   };
+  // On the Studio blue editor panel the send button inverts to white.
+  const onHero = dark && look.studio;
   const sendBtn = (
-    <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: !toStr.trim() || send.busy ? C.grey : C.action, color: "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer", flexShrink: 0 }}>
+    <button onClick={sendNow} disabled={!toStr.trim() || send.busy} style={{ fontSize: 13, fontWeight: 600, padding: onHero ? "11px 20px" : "9px 16px", borderRadius: onHero ? T.rBtn : rad(8), border: "none",
+      background: !toStr.trim() || send.busy ? C.grey : onHero ? "#fff" : C.action, color: onHero && toStr.trim() && !send.busy ? C.brand : "#fff", cursor: !toStr.trim() || send.busy ? "default" : "pointer", flexShrink: 0 }}>
       {send.busy ? "Sending…" : saved.sentAt ? "Send again" : "Send via Brevo"}
     </button>
   );
@@ -1271,7 +1406,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
           {ccOptions.length > 0 && (
             <select value="" title="Add one of this company's contacts to CC"
               onChange={(e) => { const v = e.target.value; if (v) setCcStr((s) => (s.trim() ? s.trim().replace(/,$/, "") + ", " : "") + v); }}
-              style={{ fontSize: 12.5, padding: "9px 8px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.action, fontWeight: 600, cursor: "pointer", maxWidth: 200 }}>
+              style={{ fontSize: 12.5, padding: "9px 8px", borderRadius: rad(8), border: `1px solid ${C.line}`, background: C.panel, color: C.action, fontWeight: 600, cursor: "pointer", maxWidth: 200 }}>
               <option value="">+ contact…</option>
               {ccOptions.map((c) => <option key={c.email} value={c.email}>{c.name ? `${c.name} — ${c.email}` : c.email}</option>)}
             </select>
@@ -1284,7 +1419,7 @@ function EmailEditor({ client, settings, type, templates, onLogSent, onDone, onS
       {signatureImage ? (
         <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
           <span style={{ fontSize: 11.5, fontWeight: 600, color: subC, flexShrink: 0 }}>Signature ·</span>
-          <img src={signatureImage} alt="your email signature" style={{ maxHeight: compact ? 26 : 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
+          <img src={signatureImage} alt="your email signature" style={{ maxHeight: compact ? 26 : 40, maxWidth: 220, display: "block", background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: rad(6), padding: 3 }} />
           <span style={{ fontSize: 11, color: faintC }}>added automatically</span>
         </div>
       ) : (
@@ -1378,6 +1513,20 @@ function StatStrip({ clients, settings, bounced, onFocus }) {
 // the way a moulded glass/gel button reads light from every side, not just one.
 function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onClick, title }) {
   const Tag = onClick ? "button" : "div";
+  const look = useLook();
+  if (look.studio) {
+    // Studio: a flat navy tile — no glass, reads on white panels and dark ones alike.
+    return (
+      <Tag type={onClick ? "button" : undefined} onClick={onClick} title={title} style={{ font: "inherit", textAlign: "left", width: "100%", display: "flex", flexDirection: "column", gap: 6,
+        cursor: onClick ? "pointer" : "default", background: C.boardGradient, color: "#fff", border: "1px solid rgba(255,255,255,0.08)", borderRadius: rad(12), padding: "14px 14px 12px" }}>
+        <span className="flex items-center" style={{ gap: 6, fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.72)" }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: accent, flexShrink: 0 }} />{label}
+        </span>
+        <span style={{ fontFamily: DISPLAY, fontSize: small ? 17 : 22, fontWeight: 500, lineHeight: 1.1 }}>{value}</span>
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.6)" }}>{sub}</span>
+      </Tag>
+    );
+  }
   return (
     <Tag type={onClick ? "button" : undefined} onClick={onClick} title={title} style={{
       position: "relative", overflow: "hidden",
@@ -1386,7 +1535,7 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onCl
       cursor: onClick ? "pointer" : "default",
       background: `linear-gradient(165deg, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.4) 30%, rgba(255,255,255,0.08) 55%, rgba(${bg},0.16) 100%), rgba(${bg},0.32)`,
       backdropFilter: "blur(16px) saturate(1.8)", WebkitBackdropFilter: "blur(16px) saturate(1.8)",
-      borderRadius: 20, border: "1px solid rgba(255,255,255,0.9)", padding: "9px 10px",
+      borderRadius: rad(20), border: "1px solid rgba(255,255,255,0.9)", padding: "9px 10px",
       boxShadow: [
         "inset 0 1.5px 0 rgba(255,255,255,0.95)",           // crisp bevel lip, top
         "inset 0 -1.5px 0 rgba(255,255,255,0.7)",           // bevel lip, bottom — a full rim, not just top-lit
@@ -1417,7 +1566,7 @@ function Stat({ label, value, sub, accent, small, icon, bg = "216,229,246", onCl
           left them. */}
       <div style={{ position: "relative", paddingRight: 36, height: "100%", display: "flex", flexDirection: "column" }}>
         <div className="flex items-center" style={{ gap: 5, marginBottom: 4 }}>
-          <span style={{ width: 5, height: 5, borderRadius: 5, background: accent, flexShrink: 0, boxShadow: "0 1px 2px rgba(22,48,95,0.4), inset 0 -1px 1px rgba(0,0,0,0.15)" }} />
+          <span style={{ width: 5, height: 5, borderRadius: rad(5), background: accent, flexShrink: 0, boxShadow: "0 1px 2px rgba(22,48,95,0.4), inset 0 -1px 1px rgba(0,0,0,0.15)" }} />
           <span style={{ fontSize: 10.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.sub, fontWeight: 600 }}>{label}</span>
         </div>
         <div style={{ marginTop: "auto" }}>
@@ -1437,7 +1586,7 @@ function Spark({ data, color, w = 240, h = 48 }) {
   const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - 4 - ((v - min) / span) * (h - 8)}`).join(" ");
   return (
     <svg width={w} height={h} style={{ display: "block", maxWidth: "100%" }} aria-hidden>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+      <polyline points={pts} fill="none" style={{ stroke: color }} strokeWidth="1.5" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -1452,6 +1601,7 @@ const AGE_BUCKETS = [
 function ageBucketOf(days) { return AGE_BUCKETS.find((b) => days <= b.max) || AGE_BUCKETS[5]; }
 
 function ReportsTab({ clients, settings, onOpen }) {
+  const look = useLook();
   const k = useMemo(() => computeKpis(clients, settings), [clients, settings]);
   const owed = useMemo(() => topOwed(clients, 15), [clients]);
   const byCo = useMemo(() => { const m = {}; for (const c of clients) if (c.chargeoverId) m[c.chargeoverId] = c; return m; }, [clients]);
@@ -1461,7 +1611,7 @@ function ReportsTab({ clients, settings, onOpen }) {
     fetch("/api/reports").then((r) => r.json()).then((d) => setSnaps(d.snapshots || [])).catch(() => setSnaps([]));
   }, []);
   const cur = settings.currency;
-  const panel = { background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14 };
+  const panel = { background: C.panel, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: 14 };
   const h2 = { fontFamily: DISPLAY, fontSize: 15, fontWeight: 600, marginBottom: 8 };
   const th = { textAlign: "left", color: C.sub, fontWeight: 600, fontSize: 11, padding: "4px 10px 4px 0", borderBottom: `1px solid ${C.line}`, textTransform: "uppercase", letterSpacing: "0.04em" };
   const td = { padding: "5px 10px 5px 0", borderBottom: `1px solid ${C.lineSoft}`, fontSize: 12.5 };
@@ -1497,7 +1647,7 @@ function ReportsTab({ clients, settings, onOpen }) {
       {/* KPI cards — every figure comes from computeKpis, same as the header strip.
           Same board-gradient box as the dashboard metrics section, since the Stat
           tiles' text/icon is white and needs the dark blue behind it to read. */}
-      <section className="grid" style={{ background: C.boardGradient, borderRadius: 12, padding: 14, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8 }}>
+      <section className="grid" style={{ background: look.studio ? "transparent" : C.boardGradient, borderRadius: rad(12), padding: look.studio ? 0 : 14, gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: look.studio ? 10 : 8 }}>
         <Stat label="Monthly recurring revenue" value={money(k.mrr, cur)} sub={`billing packages · ${k.mrrKnown}/${k.totalClients} amounts known`} accent={C.green} />
         <Stat label="Annual recurring revenue" value={money(k.arr, cur)} sub="MRR × 12" accent={C.green} />
         <Stat label="Total owed" value={money(k.totalOwed, cur)} sub={`${k.overdue} clients in arrears`} accent={k.totalOwed ? C.red : C.green} />
@@ -1537,7 +1687,7 @@ function ReportsTab({ clients, settings, onOpen }) {
           <div style={h2}>Clients by segment</div>
           {Object.entries(SEGMENTS).map(([key, s]) => (
             <div key={key} className="flex items-center" style={{ gap: 8, padding: "3px 0", fontSize: 12.5 }}>
-              <span style={{ width: 7, height: 7, borderRadius: 7, background: s.color, flexShrink: 0 }} />
+              <span style={{ width: 7, height: 7, borderRadius: rad(7), background: s.color, flexShrink: 0 }} />
               <span style={{ flex: 1 }}>{s.label}</span>
               <span style={{ fontFamily: MONO, fontWeight: 600 }}>{k.bySegment[key] || 0}</span>
             </div>
@@ -1545,7 +1695,7 @@ function ReportsTab({ clients, settings, onOpen }) {
           <div style={{ ...h2, marginTop: 12 }}>Workflow stages</div>
           {STAGE_ORDER.map((key) => (
             <div key={key} className="flex items-center" style={{ gap: 8, padding: "3px 0", fontSize: 12.5 }}>
-              <span style={{ width: 7, height: 7, borderRadius: 7, background: STAGES[key].color, flexShrink: 0 }} />
+              <span style={{ width: 7, height: 7, borderRadius: rad(7), background: STAGES[key].color, flexShrink: 0 }} />
               <span style={{ flex: 1 }}>{STAGES[key].label}</span>
               <span style={{ fontFamily: MONO, fontWeight: 600 }}>{k.byStage[key] || 0}</span>
             </div>
@@ -1617,7 +1767,7 @@ function ReportsTab({ clients, settings, onOpen }) {
 /* ---------------------------- Clients tab ---------------------------- */
 // A funnel icon that appears when a column filter is active.
 function Funnel({ color }) {
-  return <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden><path d="M3 5h18l-7 8v5l-4 2v-7z" fill={color} /></svg>;
+  return <svg width="10" height="10" viewBox="0 0 24 24" aria-hidden><path d="M3 5h18l-7 8v5l-4 2v-7z" style={{ fill: color }} /></svg>;
 }
 // A column heading that IS a filter dropdown. Shows a funnel + turns accent-coloured when active.
 // Column header: the label is just a label, with a funnel button beside it that
@@ -1643,7 +1793,7 @@ function HeaderFilter({ label, values, onChange, options, align = "left" }) {
         color: active ? "#fff" : "rgba(255,255,255,0.82)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
       <button onClick={toggle} title={active ? `${label}: ${values.length} selected` : `Filter by ${label}`} aria-label={`Filter by ${label}`}
         style={{ display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0, cursor: "pointer", border: "none",
-          padding: "3px 5px", borderRadius: 6, background: active ? "rgba(255,255,255,0.24)" : "transparent" }}>
+          padding: "3px 5px", borderRadius: rad(6), background: active ? "rgba(255,255,255,0.24)" : "transparent" }}>
         <Funnel color={active ? "#fff" : "rgba(255,255,255,0.55)"} />
         {values.length > 1 && <span style={{ fontSize: 9, fontWeight: 700, color: "#fff", fontFamily: MONO }}>{values.length}</span>}
       </button>
@@ -1651,7 +1801,7 @@ function HeaderFilter({ label, values, onChange, options, align = "left" }) {
         <>
           <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
           <div style={{ position: "fixed", top: menu.top, left: menu.left, width: PANEL, background: C.panel, border: `1px solid ${C.line}`,
-            borderRadius: 10, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, overflow: "hidden" }}>
+            borderRadius: rad(10), boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, overflow: "hidden" }}>
             <div className="flex items-center justify-between" style={{ padding: "8px 12px", borderBottom: `1px solid ${C.lineSoft}`, gap: 8 }}>
               <span style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.05em", color: C.faint, fontWeight: 700 }}>{label}</span>
               {active && <button onClick={() => onChange([])} style={{ fontSize: 11, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer", padding: 0 }}>Clear</button>}
@@ -1688,14 +1838,14 @@ function EmailIconMenu({ client, templates, onPick, light }) {
   return (
     <div style={{ position: "relative", display: "inline-block" }} onClick={(e) => e.stopPropagation()}>
       <button onClick={toggle} title="Email this client" aria-label={`Email ${client.company || client.name}`}
-        style={{ background: "none", border: "none", cursor: "pointer", color: light ? "rgba(255,255,255,0.9)" : C.action, padding: 4, display: "inline-flex", borderRadius: 6 }}
+        style={{ background: "none", border: "none", cursor: "pointer", color: light ? "rgba(255,255,255,0.9)" : C.action, padding: 4, display: "inline-flex", borderRadius: rad(6) }}
         onMouseEnter={(e) => (e.currentTarget.style.background = light ? "rgba(255,255,255,0.18)" : C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
       </button>
       {menu && createPortal(
         <>
           <div onClick={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
-          <div style={{ position: "fixed", top: menu.top, right: menu.right, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, minWidth: 190, overflow: "hidden" }}>
+          <div style={{ position: "fixed", top: menu.top, right: menu.right, background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(8), boxShadow: "0 8px 24px rgba(34,48,76,0.18)", zIndex: 121, minWidth: 190, overflow: "hidden" }}>
             {Object.entries(templates).sort((a, b) => a[1].label.localeCompare(b[1].label)).map(([k, v]) => (
               <button key={k} onClick={() => { onPick(k); setMenu(null); }}
                 style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", fontSize: 12.5, fontWeight: 500, background: "none", border: "none", cursor: "pointer", color: C.ink }}
@@ -1716,7 +1866,7 @@ function EmailIconMenu({ client, templates, onPick, light }) {
 function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
   return (
     <div className="flex items-center" style={{ gap: 6, minWidth: 0, justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
-      <span style={{ width: 6, height: 6, borderRadius: 6, background: value ? C.green : C.faint, flexShrink: 0 }} />
+      <span style={{ width: 6, height: 6, borderRadius: rad(6), background: value ? C.green : C.faint, flexShrink: 0 }} />
       <select value={value ? "yes" : "no"} onChange={(e) => onChange(e.target.value === "yes")}
         title={title} style={{ fontSize: 12, fontWeight: 600, color: value ? C.green : C.faint, background: "transparent", border: "none", cursor: "pointer", outline: "none", padding: "3px 0", maxWidth: "100%" }}>
         <option value="yes">{trueLabel}</option>
@@ -1730,9 +1880,9 @@ function BoolCell({ value, onChange, trueLabel, falseLabel, title }) {
 // never checked yet. Editable like the other status cells, since a human
 // sometimes knows better than the last automated check.
 const CONTACT_LIVE = {
-  true: { label: "Live", color: "#1E8E5A" },
-  false: { label: "Dead — find a new contact", color: "#C23B3B" },
-  null: { label: "Not checked yet", color: "#9AA3AF" },
+  true: { label: "Live", color: C.green },
+  false: { label: "Dead — find a new contact", color: C.red },
+  null: { label: "Not checked yet", color: C.catSlate },
 };
 function ContactLiveDot({ value, size = 8, title }) {
   const v = CONTACT_LIVE[String(value)];
@@ -1787,12 +1937,12 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
     <div role="button" tabIndex={0} onClick={openInPage} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", padding: "11px 16px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center", opacity: c.archivedClient ? 0.55 : 1 }}>
       <div style={{ minWidth: 0 }}>
         <div className="flex items-center" style={{ gap: 7, flexWrap: "wrap" }}>
-          <span style={{ width: 6, height: 6, borderRadius: 6, background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
+          <span style={{ width: 6, height: 6, borderRadius: rad(6), background: SEGMENTS[c.segment].color, flexShrink: 0 }} />
           <a href={`?client=${c.id}`} onClick={openInPage} title={`${c.company || c.name} — right-click to open in a new tab`} style={{ fontSize: 14, fontWeight: 600, color: "inherit", textDecoration: "none", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }}>{c.company || c.name}</a>
           {c.emailStatus !== "ok" && <MiniPill fg={C.red} bg={C.redBg}>bounced</MiniPill>}
           {followUpDue(c) && <MiniPill fg={C.amber} bg={C.amberBg}>follow up</MiniPill>}
           {behind >= 3 && <MiniPill fg="#fff" bg={C.red}>final notice</MiniPill>}
-          {c.priceMode === "group" && c.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
+          {c.priceMode === "group" && c.groupBillingMaster && <MiniPill fg={C.catBlue} bg={C.accentSoft}>group card</MiniPill>}
         </div>
         {(c.name || c.chargeoverId) && <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginTop: 2 }}>{c.name}{c.name && c.chargeoverId ? " · " : ""}{c.chargeoverId ? `CO#${c.chargeoverId}` : ""}</div>}
       </div>
@@ -1800,12 +1950,12 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
         {inheriting ? (
           <span onClick={(e) => { e.stopPropagation(); onOpen(groupMaster.id); }}
             title={`Set via the group card "${groupMaster.company || groupMaster.name}" — click to open it`}
-            style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[effBillingStatus].color, background: BILLING[effBillingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", maxWidth: "100%", cursor: "pointer" }}>
+            style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[effBillingStatus].color, background: BILLING[effBillingStatus].bg, border: "none", borderRadius: rad(20), padding: "3px 9px", maxWidth: "100%", cursor: "pointer" }}>
             {BILLING[effBillingStatus].label}
           </span>
         ) : (
           <select value={c.billingStatus} onClick={(e) => e.stopPropagation()} onChange={(e) => onUpdate(c.id, { billingStatus: e.target.value })}
-            title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: 20, padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
+            title="Billing status" style={{ fontSize: 11.5, fontWeight: 600, color: BILLING[c.billingStatus].color, background: BILLING[c.billingStatus].bg, border: "none", borderRadius: rad(20), padding: "3px 9px", cursor: "pointer", outline: "none", maxWidth: "100%" }}>
             {BILLING_ALPHA.map((k) => <option key={k} value={k}>{BILLING[k].label}</option>)}
           </select>
         )}
@@ -1828,7 +1978,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
         <div className="flex items-center" style={{ gap: 6, minWidth: 0, justifyContent: "center", cursor: "pointer" }}
           onClick={(e) => { e.stopPropagation(); onOpen(groupMaster.id); }}
           title={`Set via the group card "${groupMaster.company || groupMaster.name}" — click to open it`}>
-          <span style={{ width: 6, height: 6, borderRadius: 6, background: effCoHasSubscription ? C.green : C.faint, flexShrink: 0 }} />
+          <span style={{ width: 6, height: 6, borderRadius: rad(6), background: effCoHasSubscription ? C.green : C.faint, flexShrink: 0 }} />
           <span style={{ fontSize: 12, fontWeight: 600, color: effCoHasSubscription ? C.green : C.faint }}>{effCoHasSubscription ? "Active Subscription" : "No Subscription"}</span>
         </div>
       ) : (
@@ -1864,7 +2014,7 @@ const ClientRow = React.memo(function ClientRow({ c, settings, templates, gridCo
 function Chip({ label, onClear }) {
   return (
     <button onClick={onClear} title={`Remove: ${label}`} className="flex items-center"
-      style={{ gap: 6, background: C.boardGradient, color: "#fff", border: "none", borderRadius: 20,
+      style={{ gap: 6, background: C.boardGradient, color: "#fff", border: "none", borderRadius: rad(20),
         padding: "4px 8px 4px 11px", fontSize: 12, fontWeight: 600, cursor: "pointer", maxWidth: 260 }}>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
       <span aria-hidden style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
@@ -1874,6 +2024,7 @@ function Chip({ label, onClear }) {
 }
 
 function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen, onEmail, onUpdate, onUpdateWithLog }) {
+  const look = useLook();
   // Each column filter is a list of accepted values; empty means "no filter".
   const [seg, setSeg] = useState([]);
   const [bill, setBill] = useState([]);
@@ -1940,6 +2091,49 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
   }, [clients, groupMasters, seg, bill, stage, co, contact, cust, owed, q, showArchived, showOffices, foc]);
   const totalActive = clients.filter((c) => !c.archivedClient).length;
   const gridCols = "1.2fr 0.85fr 0.7fr 0.9fr 0.85fr 0.9fr 0.9fr 40px";
+  const headerCells = (
+    <>
+      <HeaderFilter label="Client" values={seg} onChange={setSeg} options={SEGMENTS_ALPHA.map((k) => [k, SEGMENTS[k].label])} />
+      <HeaderFilter label="Billing" values={bill} onChange={setBill} align="center" options={BILLING_ALPHA.map((k) => [k, BILLING[k].label])} />
+      <HeaderFilter label="Stage" values={stage} onChange={setStage} align="center" options={STAGES_ALPHA.map((k) => [k, STAGES[k].label])} />
+      <HeaderFilter label="Subscription" values={co} onChange={setCo} align="center" options={[["yes", "Active Subscription"], ["no", "No Subscription"]]} />
+      <HeaderFilter label="Contact" values={contact} onChange={setContact} align="center" options={[["true", "Live"], ["false", "Dead"], ["null", "Not checked"]]} />
+      <HeaderFilter label="Customer" values={cust} onChange={setCust} align="center" options={CUSTOMER_ORDER.map((k) => [k, CUSTOMER_KIND[k].label])} />
+      <HeaderFilter label="Owed / rate" values={owed} onChange={setOwed} align="right" options={[["overdue", "Overdue"], ["current", "Up to date"]]} />
+      <span />
+    </>
+  );
+  const rows = list.map((c) => (
+    <ClientRow key={c.id} c={c} settings={settings} templates={templates} gridCols={gridCols}
+      groupMaster={c.officeGroup ? groupMasters.get(c.officeGroup) : null}
+      onOpen={onOpen} onEmail={onEmail} onUpdate={onUpdate} onUpdateWithLog={onUpdateWithLog} />
+  ));
+  if (look.studio) {
+    // Studio: the Archived / Multi-offices checkboxes become the notch tabs.
+    const viewKey = showArchived ? "archived" : showOffices ? "multi" : "active";
+    const counts = {
+      active: clients.filter((c) => !c.archivedClient && !coveredByGroup(c)).length,
+      multi: clients.filter((c) => !c.archivedClient && c.multiOffice && !c.groupBillingMaster).length,
+      archived: clients.filter((c) => c.archivedClient).length,
+    };
+    return (
+      <div>
+        <StudioFilterBar chips={chips} onClearAll={clearAll} search={q} onSearch={setQ} placeholder="Search name, company, email or CO#" searchTitle="Searches name, company, email, old emails and ChargeOver ID" />
+        <NotchPanel title="Client list" sub={`${list.length} of ${totalActive} shown`}
+          tabs={[{ key: "active", label: "Active", count: counts.active }, { key: "multi", label: "Multi-offices", count: counts.multi }, { key: "archived", label: "Archived", count: counts.archived }]}
+          active={viewKey} onTab={(k) => { setShowArchived(k === "archived"); setShowOffices(k === "multi"); }}
+          right={<IconCircle dark icon="export" title="Export these clients as CSV" onClick={() => exportCsv(list)} />}>
+          <div className="crm-table" style={{ overflow: "hidden", borderRadius: rad(14) }}>
+            <div style={{ padding: "4px 16px 12px", display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>{headerCells}</div>
+            <div style={{ background: C.panel, color: C.ink, borderRadius: rad(14), overflow: "hidden", border: `1px solid ${alpha(C.line, 60)}` }}>
+              {rows}
+              {list.length === 0 && <div style={{ padding: 36, textAlign: "center", color: C.sub, fontSize: 13 }}>No clients match these filters.</div>}
+            </div>
+          </div>
+        </NotchPanel>
+      </div>
+    );
+  }
   return (
     <div>
       <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 12 }}>
@@ -1953,9 +2147,9 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
           <input type="checkbox" checked={showOffices} onChange={(e) => setShowOffices(e.target.checked)} /> Multi-offices
         </label>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" title="Searches name, company, email, old emails and ChargeOver ID"
-          style={{ fontSize: 13, padding: "8px 12px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
+          style={{ fontSize: 13, padding: "8px 12px", borderRadius: rad(8), border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 320 }} />
       </div>
-      <div className="crm-table" style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "hidden" }}>
+      <div className="crm-table" style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, overflow: "hidden" }}>
         {/* Same Trello-blue gradient as the Workflow board */}
         <div style={{ padding: "10px 16px", background: C.boardGradient, borderBottom: `1px solid ${C.line}`, display: "grid", gridTemplateColumns: gridCols, gap: 20, alignItems: "center" }}>
           <HeaderFilter label="Client" values={seg} onChange={setSeg} options={SEGMENTS_ALPHA.map((k) => [k, SEGMENTS[k].label])} />
@@ -1980,6 +2174,7 @@ function ClientsTab({ clients, settings, templates, focus, onClearFocus, onOpen,
 
 /* --------------------------- Workflow tab --------------------------- */
 function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
+  const look = useLook();
   const [board, setBoard] = useState("stages"); // stages | tasks
   const [mine, setMine] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -2013,25 +2208,8 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
     <button onClick={() => setBoard(key)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: board === key ? "#fff" : "transparent", color: board === key ? C.ink : "rgba(255,255,255,0.85)", cursor: "pointer" }}>{label}</button>
   );
 
-  return (
-    // Trello-style board backdrop: deep blue gradient behind both boards.
-    <div style={{ background: C.boardGradient, borderRadius: 14, padding: "14px 14px 18px", margin: "0 -4px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={{ display: "inline-flex", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
-          {segBtn("stages", "Client stages")}
-          {segBtn("tasks", "Tasks")}
-        </div>
-        {/* All cards / My cards — same segmented style as the board switcher */}
-        <div style={{ display: "inline-flex", borderRadius: 9, overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
-          {[[false, "All cards"], [true, "My cards"]].map(([v, label]) => (
-            <button key={label} onClick={() => setMine(v)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: mine === v ? "#fff" : "transparent", color: mine === v ? C.ink : "rgba(255,255,255,0.85)", cursor: "pointer" }}>{label}</button>
-          ))}
-        </div>
-        {mine && !visible.length && board === "stages" && (
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>No cards assigned to you — set yourself as Owner on a client card (Info tab).</span>
-        )}
-      </div>
-
+  const boardBody = (
+    <>
       {board === "tasks" ? (
         <TasksBoard tasks={tasks} setTasks={setTasks} staff={staff} staffByEmail={staffByEmail} clients={allClients} user={user} onOpen={onOpen} mine={mine} isMine={isMine} />
       ) : (
@@ -2052,28 +2230,28 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
               onDragOver={(e) => { e.preventDefault(); if (dragOverStage !== stage) setDragOverStage(stage); }}
               onDragLeave={() => setDragOverStage((s) => (s === stage ? null : s))}
               onDrop={(e) => drop(e, stage)}
-              style={{ background: C.panel, borderRadius: 12, border: `1px solid ${dragOverStage === stage ? C.action : C.line}`, overflow: "hidden" }}>
+              style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${dragOverStage === stage ? C.action : C.line}`, overflow: "hidden" }}>
               <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 8, background: STAGES[stage].color }} />
+                <span style={{ width: 8, height: 8, borderRadius: rad(8), background: STAGES[stage].color }} />
                 <span style={{ fontSize: 12.5, fontWeight: 700 }}>{STAGES[stage].label}</span>
                 <span style={{ fontSize: 11, color: C.faint, marginLeft: "auto", fontFamily: MONO }}>{col.length}</span>
               </div>
               <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6, minHeight: 60 }}>
                 {col.map((c) => (
                   <div key={c.id} draggable={!showHidden} onDragStart={(e) => e.dataTransfer.setData("text/plain", c.id)}
-                    style={{ position: "relative", background: C.paper, borderRadius: 8, padding: "8px 10px", border: `1px solid ${followUpDue(c) ? C.amber : C.line}`, cursor: showHidden ? "default" : "grab" }}>
+                    style={{ position: "relative", background: C.paper, borderRadius: rad(8), padding: "8px 10px", border: `1px solid ${followUpDue(c) ? C.amber : C.line}`, cursor: showHidden ? "default" : "grab" }}>
                     <button
                       onClick={() => onUpdate(c.id, { workflowHidden: !showHidden })}
                       title={showHidden ? "Add back to workflow" : "Remove from workflow"}
                       aria-label={showHidden ? "Add back to workflow" : "Remove from workflow"}
-                      style={{ position: "absolute", top: 2, right: 2, background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer", lineHeight: 1, padding: 6, borderRadius: 6 }}
+                      style={{ position: "absolute", top: 2, right: 2, background: "none", border: "none", color: C.faint, fontSize: 13, cursor: "pointer", lineHeight: 1, padding: 6, borderRadius: rad(6) }}
                       onMouseEnter={(e) => (e.currentTarget.style.background = C.lineSoft)} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                       {showHidden ? "↺" : "✕"}
                     </button>
                     <button onClick={() => onOpen(c.id)} style={{ background: "none", border: "none", padding: 0, paddingRight: 16, cursor: "pointer", textAlign: "left", width: "100%" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>{c.company || c.name}</span>
-                        {c.flag && <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 20, background: CLIENT_FLAGS[c.flag].bg, color: CLIENT_FLAGS[c.flag].fg }}>{CLIENT_FLAGS[c.flag].label}</span>}
+                        {c.flag && <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: rad(20), background: CLIENT_FLAGS[c.flag].bg, color: CLIENT_FLAGS[c.flag].fg }}>{CLIENT_FLAGS[c.flag].label}</span>}
                       </div>
                       <div style={{ fontSize: 11, color: C.sub, fontFamily: MONO }}>{SEGMENTS[c.segment].label}{arrearsPeriods(c) ? ` · ${arrearsPeriods(c)}p behind` : ""}</div>
                       {c.followUp && <div style={{ fontSize: 10.5, color: followUpDue(c) ? C.amber : C.faint, marginTop: 2 }}>Follow up {fmtDate(c.followUp)}</div>}
@@ -2085,7 +2263,7 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
                     </button>
                     {!showHidden && (
                       <select value={c.stage} onChange={(e) => onStage(c.id, e.target.value)}
-                        style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 6px", borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.sub, cursor: "pointer" }}>
+                        style={{ marginTop: 6, width: "100%", fontSize: 11, padding: "4px 6px", borderRadius: rad(6), border: `1px solid ${C.line}`, background: C.panel, color: C.sub, cursor: "pointer" }}>
                         {STAGES_ALPHA.map((s) => <option key={s} value={s}>{STAGES[s].label}</option>)}
                       </select>
                     )}
@@ -2105,6 +2283,46 @@ function WorkflowTab({ clients, allClients, user, onOpen, onStage, onUpdate }) {
       </div>
       </>
       )}
+    </>
+  );
+  if (look.studio) {
+    const toggle = (
+      <div style={{ display: "inline-flex", borderRadius: 999, padding: 3, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }}>
+        {[[false, "All cards"], [true, "My cards"]].map(([v, label]) => (
+          <button key={label} onClick={() => setMine(v)} style={{ padding: "7px 14px", fontSize: 12.5, fontWeight: 600, border: "none", borderRadius: 999, cursor: "pointer",
+            background: mine === v ? "#fff" : "transparent", color: mine === v ? C.brand : "rgba(255,255,255,0.8)" }}>{label}</button>
+        ))}
+      </div>
+    );
+    return (
+      <NotchPanel title={board === "tasks" ? "Team tasks" : "Client stages"}
+        sub={board === "tasks" ? "Drag cards between lanes" : mine && !visible.length ? "No cards assigned to you — set yourself as Owner on a client card" : "Drag a card to change its stage"}
+        tabs={[{ key: "stages", label: "Client stages", count: visible.length }, { key: "tasks", label: "Tasks", count: tasks.filter((t) => t.lane !== "done").length }]}
+        active={board} onTab={setBoard} right={toggle}>
+        {boardBody}
+      </NotchPanel>
+    );
+  }
+  return (
+    // Trello-style board backdrop: deep blue gradient behind both boards.
+    <div style={{ background: C.boardGradient, borderRadius: rad(14), padding: "14px 14px 18px", margin: "0 -4px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", borderRadius: rad(9), overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
+          {segBtn("stages", "Client stages")}
+          {segBtn("tasks", "Tasks")}
+        </div>
+        {/* All cards / My cards — same segmented style as the board switcher */}
+        <div style={{ display: "inline-flex", borderRadius: rad(9), overflow: "hidden", background: "rgba(255,255,255,0.14)" }}>
+          {[[false, "All cards"], [true, "My cards"]].map(([v, label]) => (
+            <button key={label} onClick={() => setMine(v)} style={{ padding: "6px 14px", fontSize: 13, fontWeight: 600, border: "none", background: mine === v ? "#fff" : "transparent", color: mine === v ? C.ink : "rgba(255,255,255,0.85)", cursor: "pointer" }}>{label}</button>
+          ))}
+        </div>
+        {mine && !visible.length && board === "stages" && (
+          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.75)" }}>No cards assigned to you — set yourself as Owner on a client card (Info tab).</span>
+        )}
+      </div>
+
+      {boardBody}
     </div>
   );
 }
@@ -2159,9 +2377,9 @@ function TasksBoard({ tasks, setTasks, staff, staffByEmail, clients, user, onOpe
               onDragOver={(e) => { e.preventDefault(); if (dragOver !== lane) setDragOver(lane); }}
               onDragLeave={() => setDragOver((s) => (s === lane ? null : s))}
               onDrop={(e) => drop(e, lane)}
-              style={{ background: C.panel, borderRadius: 12, border: `1px solid ${dragOver === lane ? C.action : C.line}`, overflow: "hidden" }}>
+              style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${dragOver === lane ? C.action : C.line}`, overflow: "hidden" }}>
               <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 8, background: LANE_COLOR[lane] }} />
+                <span style={{ width: 8, height: 8, borderRadius: rad(8), background: LANE_COLOR[lane] }} />
                 <span style={{ fontSize: 12.5, fontWeight: 700 }}>{label}</span>
                 <span style={{ fontSize: 11, color: C.faint, marginLeft: "auto", fontFamily: MONO }}>{col.length}</span>
               </div>
@@ -2214,7 +2432,7 @@ function AssignButton({ owner, staff, staffByEmail, onAssign, size = 18 }) {
       {menu && createPortal(
         <>
           <div onClick={(e) => { e.stopPropagation(); setMenu(null); }} style={{ position: "fixed", inset: 0, zIndex: 120 }} />
-          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: menu.top, right: menu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ position: "fixed", top: menu.top, right: menu.right, zIndex: 121, background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(8), boxShadow: "0 10px 28px rgba(34,48,76,0.2)", overflow: "hidden", minWidth: 160 }}>
             {staffAlpha(staff).map((s) => (
               <button key={s.email} onClick={() => { onAssign(s.email); setMenu(null); }}
                 style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 10px", fontSize: 12.5, background: owner === s.email ? C.lineSoft : "none", border: "none", cursor: "pointer", color: C.ink }}>
@@ -2237,11 +2455,11 @@ function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssig
   const overdue = task.due && task.lane !== "done" && task.due < iso(); // string compare — a task due today is not overdue
   const cl = parseChecklist(task.checklist);
   const clDone = cl.filter(([, d]) => d).length;
-  const iconBtn = { background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 6, lineHeight: 1, display: "inline-flex" };
+  const iconBtn = { background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: rad(6), lineHeight: 1, display: "inline-flex" };
   return (
     <div draggable onDragStart={onDragStart} onClick={onOpen}
       onMouseLeave={() => setConfirmDel(false)}
-      style={{ position: "relative", background: C.paper, borderRadius: 8, border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
+      style={{ position: "relative", background: C.paper, borderRadius: rad(8), border: `1px solid ${overdue ? C.red : C.line}`, padding: "8px 9px", cursor: "pointer" }}>
       {/* Edit + delete, top right. Delete asks twice (icon turns into a red "sure?"). */}
       <div style={{ position: "absolute", top: 3, right: 3, display: "flex", gap: 1 }}>
         <button onClick={(e) => { e.stopPropagation(); onOpen(); }} title="Edit task" style={{ ...iconBtn, color: C.faint }}>
@@ -2254,18 +2472,18 @@ function TaskCard({ task, client, staff, staffByEmail, onOpen, onClient, onAssig
           )}
         </button>
       </div>
-      {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: 20, background: lbl.bg, color: lbl.fg, marginRight: 44 }}>{lbl.label}</span>}
+      {lbl && <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, padding: "1px 7px", borderRadius: rad(20), background: lbl.bg, color: lbl.fg, marginRight: 44 }}>{lbl.label}</span>}
       <div style={{ fontSize: 12.5, marginTop: lbl ? 5 : 0, paddingRight: lbl ? 0 : 44, color: C.ink, lineHeight: 1.3, opacity: task.lane === "done" ? 0.6 : 1, textDecoration: task.lane === "done" ? "line-through" : "none" }}>{task.title}</div>
       {task.note && <div style={{ fontSize: 10.5, color: C.sub, marginTop: 3, lineHeight: 1.3 }}>{task.note}</div>}
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7 }}>
         {client && (
           <button onClick={(e) => { e.stopPropagation(); onClient(client.id); }} title="Open client"
-            style={{ fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 6, background: "#E7EDF8", color: C.action, border: "none", cursor: "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            style={{ fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: rad(6), background: C.accentSoft, color: C.action, border: "none", cursor: "pointer", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {client.company || client.name}
           </button>
         )}
         {cl.length > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 6, background: clDone === cl.length ? C.greenBg : C.lineSoft, color: clDone === cl.length ? C.green : C.sub }}>
+          <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: rad(6), background: clDone === cl.length ? C.greenBg : C.lineSoft, color: clDone === cl.length ? C.green : C.sub }}>
             ☑ {clDone}/{cl.length}
           </span>
         )}
@@ -2328,7 +2546,7 @@ function TaskModal({ task, staff, clients, onClose, onSave, onDelete }) {
         {confirmDel ? (
           <>
             <span style={{ fontSize: 12, color: C.red }}>Delete this task?</span>
-            <button onClick={onDelete} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: "none", background: C.red, color: "#fff", cursor: "pointer" }}>Delete</button>
+            <button onClick={onDelete} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: rad(8), border: "none", background: C.red, color: "#fff", cursor: "pointer" }}>Delete</button>
             <button onClick={() => setConfirmDel(false)} style={{ fontSize: 12.5, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
           </>
         ) : (
@@ -2351,7 +2569,7 @@ function ClientPicker({ clients, value, onChange }) {
   if (selected && !open) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 38 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 600, padding: "3px 8px", borderRadius: 6, background: "#E7EDF8", color: C.action, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.company || selected.name}</span>
+        <span style={{ fontSize: 12.5, fontWeight: 600, padding: "3px 8px", borderRadius: rad(6), background: C.accentSoft, color: C.action, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selected.company || selected.name}</span>
         <button onClick={() => onChange("")} title="Unlink" style={{ background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13 }}>✕</button>
         <button onClick={() => setOpen(true)} style={{ background: "none", border: "none", color: C.action, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>change</button>
       </div>
@@ -2361,7 +2579,7 @@ function ClientPicker({ clients, value, onChange }) {
     <div style={{ position: "relative" }}>
       <input style={inputStyle} value={q} autoFocus={open} onChange={(e) => { setQ(e.target.value); setOpen(true); }} placeholder="Search clients…" />
       {open && matches.length > 0 && (
-        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: 8, marginTop: 4, zIndex: 5, overflow: "hidden", boxShadow: "0 8px 24px rgba(34,48,76,0.14)" }}>
+        <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(8), marginTop: 4, zIndex: 5, overflow: "hidden", boxShadow: "0 8px 24px rgba(34,48,76,0.14)" }}>
           {matches.map((c) => (
             <button key={c.id} onClick={() => { onChange(c.id); setQ(""); setOpen(false); }}
               style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 11px", fontSize: 12.5, background: "none", border: "none", cursor: "pointer", color: C.ink }}
@@ -2385,6 +2603,8 @@ function RepliesTab({ replies, unmatched, clients, templates, settings, signatur
   const [respondTo, setRespondTo] = useState(null); // the inbound message being replied to
   const byId = useMemo(() => Object.fromEntries(clients.map((c) => [c.id, c])), [clients]);
   const [err, setErr] = useState("");
+  const look = useLook();
+  const [rview, setRview] = useState("inbox");
   const patch = async (body) => {
     if (busyId) return; // a second click while one is in flight is always a mistake
     setBusyId(body.id); setErr("");
@@ -2401,23 +2621,105 @@ function RepliesTab({ replies, unmatched, clients, templates, settings, signatur
     finally { setBusyId(""); }
   };
 
+  const errBox = err && (
+    <div style={{ background: C.redBg, border: `1px solid ${alpha(C.red, 20)}`, borderRadius: rad(10), padding: "9px 13px", fontSize: 12.5, color: C.red, fontWeight: 600 }}>{err}</div>
+  );
+  if (look.studio) {
+    const tab = rview === "unmatched" && unmatched.length ? "unmatched" : "inbox";
+    return (
+      <NotchPanel title="Client replies" sub="From the accounting inbox, matched to client cards" active={tab} onTab={setRview}
+        tabs={[{ key: "inbox", label: "Inbox", count: replies.length }, { key: "unmatched", label: "Needs matching", count: unmatched.length }]}
+        right={<IconCircle dark icon="sync" title="Check for new replies" onClick={onRefresh} />}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, color: C.ink }}>
+          {errBox}
+          {tab === "unmatched" ? (<>
+            {unmatched.length > 0 && (
+              <div style={{ background: C.amberBg, borderRadius: rad(12), border: `1px solid ${alpha(C.amber, 33)}`, padding: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: C.amber, marginBottom: 8 }}>
+                  Needs matching · {unmatched.length}
+                </div>
+                <div style={{ fontSize: 11.5, color: C.sub, marginBottom: 10 }}>
+                  We couldn&rsquo;t tell which client these came from. Pick one to file it against.
+                </div>
+                {unmatched.map((m) => (
+                  <div key={m.id} style={{ background: C.panel, borderRadius: rad(8), padding: "9px 11px", marginBottom: 6, opacity: busyId === m.id ? 0.5 : 1 }}>
+                    <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 12, fontFamily: MONO, fontWeight: 600 }}>{m.fromEmail}</span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ fontSize: 10.5, color: C.faint }}>{fmtDate(m.sentAt)}</span>
+                    </div>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, marginTop: 3 }}>{m.subject || "(no subject)"}</div>
+                    <div style={{ fontSize: 12, color: C.sub, marginTop: 3, lineHeight: 1.5 }}>{m.snippet}</div>
+                    <div style={{ marginTop: 8 }}>
+                      <ClientPicker clients={clients} value="" onChange={(cid) => cid && patch({ id: m.id, action: "assign", clientId: cid })} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>) : replies.length ? (
+            <>
+            {replies.map((m) => {
+              const c = byId[m.clientId];
+              const open = openId === m.id;
+              return (
+                <div key={m.id} style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: 14, opacity: busyId === m.id ? 0.5 : 1 }}>
+                  <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap" }}>
+                    <button onClick={() => c && onOpen(c.id)} disabled={!c} title={c ? "Open client" : ""}
+                      style={{ background: "none", border: "none", padding: 0, cursor: c ? "pointer" : "default", fontSize: 14, fontWeight: 700, color: C.ink }}>
+                      {c ? (c.company || c.name) : "Unknown client"}
+                    </button>
+                    <span style={{ fontSize: 11.5, color: C.sub, fontFamily: MONO }}>{m.fromEmail}</span>
+                    {/* Low confidence means the match came from an ambiguous signal —
+                        worth a glance before acting on it. */}
+                    {m.matchConf === "low" && <MiniPill fg={C.amber} bg={C.amberBg}>low confidence</MiniPill>}
+                    <span style={{ flex: 1 }} />
+                    <span style={{ fontSize: 11.5, color: C.faint }}>{fmtDate(m.sentAt)}</span>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginTop: 6 }}>{m.subject || "(no subject)"}</div>
+                  <div style={{ fontSize: 12.5, color: C.sub, marginTop: 4, whiteSpace: open ? "pre-wrap" : "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.5 }}>
+                    {open ? (m.bodyText || m.snippet) : m.snippet}
+                  </div>
+                  <div className="flex items-center" style={{ gap: 8, marginTop: 10 }}>
+                    <GhostBtn onClick={() => setOpenId(open ? null : m.id)}>{open ? "Collapse" : "Read full"}</GhostBtn>
+                    <MiniBtn solid onClick={() => setRespondTo(m)}>
+                      <span className="flex items-center" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 17 4 12 9 7" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" /></svg>
+                        Respond
+                      </span>
+                    </MiniBtn>
+                    <MiniBtn onClick={() => patch({ id: m.id, action: "handled" })}>Mark handled</MiniBtn>
+                  </div>
+                </div>
+              );
+            })}
+            </>
+          ) : (
+            <div style={{ padding: "36px 12px", textAlign: "center", color: "rgba(255,255,255,0.7)", fontSize: 14 }}>No replies waiting. New client replies appear here within a couple of minutes.</div>
+          )}
+        </div>
+      {respondTo && (
+        <RespondModal message={respondTo} client={byId[respondTo.clientId]} templates={templates} settings={settings} signatureImage={signatureImage}
+          onClose={() => setRespondTo(null)} onSent={() => { setRespondTo(null); onRefresh(); }} />
+      )}
+      </NotchPanel>
+    );
+  }
   if (!replies.length && !unmatched.length) {
     return (
-      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+      <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
         No replies waiting. New client replies appear here within a couple of minutes.
       </div>
     );
   }
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      {err && (
-        <div style={{ background: C.redBg, border: `1px solid ${C.red}33`, borderRadius: 10, padding: "9px 13px", fontSize: 12.5, color: C.red, fontWeight: 600 }}>{err}</div>
-      )}
+      {errBox}
       {/* Needs matching — mail we could not confidently attribute. Without this
           panel an unmatched reply would be invisible, which is the exact failure
           this feature exists to prevent. */}
       {unmatched.length > 0 && (
-        <div style={{ background: C.amberBg, borderRadius: 12, border: `1px solid ${C.amber}55`, padding: 14 }}>
+        <div style={{ background: C.amberBg, borderRadius: rad(12), border: `1px solid ${alpha(C.amber, 33)}`, padding: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: C.amber, marginBottom: 8 }}>
             Needs matching · {unmatched.length}
           </div>
@@ -2425,7 +2727,7 @@ function RepliesTab({ replies, unmatched, clients, templates, settings, signatur
             We couldn&rsquo;t tell which client these came from. Pick one to file it against.
           </div>
           {unmatched.map((m) => (
-            <div key={m.id} style={{ background: C.panel, borderRadius: 8, padding: "9px 11px", marginBottom: 6, opacity: busyId === m.id ? 0.5 : 1 }}>
+            <div key={m.id} style={{ background: C.panel, borderRadius: rad(8), padding: "9px 11px", marginBottom: 6, opacity: busyId === m.id ? 0.5 : 1 }}>
               <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, fontFamily: MONO, fontWeight: 600 }}>{m.fromEmail}</span>
                 <span style={{ flex: 1 }} />
@@ -2445,7 +2747,7 @@ function RepliesTab({ replies, unmatched, clients, templates, settings, signatur
         const c = byId[m.clientId];
         const open = openId === m.id;
         return (
-          <div key={m.id} style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, opacity: busyId === m.id ? 0.5 : 1 }}>
+          <div key={m.id} style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: 14, opacity: busyId === m.id ? 0.5 : 1 }}>
             <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap" }}>
               <button onClick={() => c && onOpen(c.id)} disabled={!c} title={c ? "Open client" : ""}
                 style={{ background: "none", border: "none", padding: 0, cursor: c ? "pointer" : "default", fontSize: 14, fontWeight: 700, color: C.ink }}>
@@ -2509,7 +2811,7 @@ function RespondModal({ message, client, templates, settings, signatureImage, on
     } catch { setState({ busy: false, err: "Couldn't reach the server — try again.", done: false }); }
   };
   const subject = /^re:/i.test(message.subject || "") ? message.subject : `Re: ${message.subject || "(no subject)"}`;
-  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: 8, padding: "8px 11px" };
+  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: rad(8), padding: "8px 11px" };
   return (
     <Modal title={`Respond to ${client ? (client.company || client.name) : message.fromEmail}`} onClose={onClose} blueHeader tall>
       <Field dark label="To"><div style={ro}>{message.fromEmail}</div></Field>
@@ -2524,7 +2826,7 @@ function RespondModal({ message, client, templates, settings, signatureImage, on
       {signatureImage
         ? <div className="flex items-center" style={{ gap: 8, marginBottom: 10 }}>
             <span style={{ fontSize: 11.5, fontWeight: 600, color: "rgba(255,255,255,0.85)", flexShrink: 0 }}>Signature ·</span>
-            <img src={signatureImage} alt="your signature" style={{ maxHeight: 26, maxWidth: 220, background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: 6, padding: 3 }} />
+            <img src={signatureImage} alt="your signature" style={{ maxHeight: 26, maxWidth: 220, background: "#fff", border: `1px solid ${C.lineSoft}`, borderRadius: rad(6), padding: 3 }} />
             <span style={{ fontSize: 11, color: "rgba(255,255,255,0.65)" }}>added automatically</span>
           </div>
         : <p style={{ fontSize: 11.5, color: "rgba(255,255,255,0.65)", marginBottom: 10 }}>No signature image on your user card — the reply sends without one.</p>}
@@ -2535,7 +2837,7 @@ function RespondModal({ message, client, templates, settings, signatureImage, on
         ) : (
           <>
             <button onClick={send} disabled={state.busy || !body.trim()}
-              style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: state.busy || !body.trim() ? C.grey : C.action, color: "#fff", cursor: state.busy || !body.trim() ? "default" : "pointer" }}>
+              style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: rad(8), border: "none", background: state.busy || !body.trim() ? C.grey : C.action, color: "#fff", cursor: state.busy || !body.trim() ? "default" : "pointer" }}>
               {state.busy ? "Sending…" : "Send reply"}
             </button>
             <GhostBtn onClick={onClose}>Cancel</GhostBtn>
@@ -2549,7 +2851,24 @@ function RespondModal({ message, client, templates, settings, signatureImage, on
 
 /* --------------------------- Recovery tab --------------------------- */
 function RecoveryTab({ bounced, onApply, onUpdate, onOpen }) {
-  if (bounced.length === 0) return <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>No bounced or undelivered contacts. When an email bounces in Brevo, set the client's email status to “Bounced” and recover a replacement here.</div>;
+  const look = useLook();
+  const [view, setView] = useState("all");
+  if (look.studio) {
+    const waiting = bounced.filter((c) => c.candidates?.length > 0);
+    const shown = view === "waiting" ? waiting : bounced;
+    return (
+      <NotchPanel title="Contact recovery" sub="Claude proposes replacements; you approve" active={view} onTab={setView}
+        tabs={[{ key: "all", label: "Bounced", count: bounced.length }, { key: "waiting", label: "Awaiting approval", count: waiting.length }]}>
+        <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.7)", lineHeight: 1.5, margin: "0 4px 14px", maxWidth: 820 }}>Claude searches the web for current business contact details and proposes matches with source and confidence. You approve; the old address is archived and stays searchable.</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, color: C.ink }}>
+          {shown.length === 0
+            ? <div style={{ padding: "30px 12px", textAlign: "center", color: "rgba(255,255,255,0.7)", fontSize: 14 }}>{view === "waiting" ? "No recovered contacts waiting for approval." : "No bounced or undelivered contacts."}</div>
+            : shown.map((c) => <RecoveryRow key={c.id} client={c} onApply={onApply} onUpdate={onUpdate} onOpen={onOpen} />)}
+        </div>
+      </NotchPanel>
+    );
+  }
+  if (bounced.length === 0) return <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>No bounced or undelivered contacts. When an email bounces in Brevo, set the client's email status to “Bounced” and recover a replacement here.</div>;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5 }}>Claude searches the web for current business contact details and proposes matches with source and confidence. You approve; the old address is archived and stays searchable.</div>
@@ -2576,7 +2895,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
   };
   const conf = { high: C.green, medium: C.amber, low: C.grey };
   return (
-    <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 16 }}>
+    <div style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: 16 }}>
       <div className="flex flex-wrap items-center justify-between" style={{ gap: 10 }}>
         <div>
           <button onClick={() => onOpen(client.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: C.ink }}>{client.company || client.name}</button>
@@ -2586,7 +2905,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
           <SolidBtn onClick={run}>{busy ? "Searching…" : client.candidates?.length ? "Search again" : "Find alternative contact"}</SolidBtn>
           <button onClick={() => onUpdate(client.id, { emailStatus: "ok", candidates: [], activity: logActivity(client, "contact", "Removed from contact recovery — email marked deliverable") })}
             title="Remove from this list (marks the email deliverable again)" aria-label="Remove from recovery list"
-            style={{ background: "none", border: "none", color: C.faint, fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4, borderRadius: 6 }}
+            style={{ background: "none", border: "none", color: C.faint, fontSize: 16, cursor: "pointer", lineHeight: 1, padding: 4, borderRadius: rad(6) }}
             onMouseEnter={(e) => (e.currentTarget.style.color = C.red)} onMouseLeave={(e) => (e.currentTarget.style.color = C.faint)}>
             ✕
           </button>
@@ -2596,7 +2915,7 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
       {client.candidates?.length > 0 && (
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
           {client.candidates.map((cand, i) => (
-            <div key={i} className="flex flex-wrap items-center justify-between" style={{ gap: 10, background: C.paper, borderRadius: 8, border: `1px solid ${C.line}`, padding: "10px 12px" }}>
+            <div key={i} className="flex flex-wrap items-center justify-between" style={{ gap: 10, background: C.paper, borderRadius: rad(8), border: `1px solid ${C.line}`, padding: "10px 12px" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontFamily: MONO, fontWeight: 600 }}>{cand.email || "—"}{cand.phone ? ` · ${cand.phone}` : ""}</div>
                 <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2 }}>{cand.note} · source: {cand.source}<span style={{ marginLeft: 8, color: conf[cand.confidence] || C.grey, fontWeight: 600 }}>{cand.confidence} confidence</span></div>
@@ -2605,11 +2924,11 @@ function RecoveryRow({ client, onApply, onUpdate, onOpen }) {
                 {/* Resend the bounced email to this candidate — preview first, doesn't change the record */}
                 <button onClick={() => setResendCand(cand)} disabled={!cand.email || !lastComm}
                   title={!cand.email ? "No email for this contact" : !lastComm ? "No previous email to resend" : "Preview & resend the last email to this contact"}
-                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: cand.email && lastComm ? C.action : C.faint, cursor: cand.email && lastComm ? "pointer" : "default", whiteSpace: "nowrap" }}>
+                  style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12.5, fontWeight: 600, padding: "8px 12px", borderRadius: rad(8), border: `1px solid ${C.line}`, background: C.panel, color: cand.email && lastComm ? C.action : C.faint, cursor: cand.email && lastComm ? "pointer" : "default", whiteSpace: "nowrap" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
                   Resend
                 </button>
-                <button onClick={() => onApply(client.id, cand)} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 8, border: "none", background: C.action, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>Apply & archive old</button>
+                <button onClick={() => onApply(client.id, cand)} style={{ fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: rad(8), border: "none", background: C.action, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>Apply & archive old</button>
               </div>
             </div>
           ))}
@@ -2643,7 +2962,7 @@ function ResendModal({ client, cand, lastComm, onClose, onLog }) {
       setState({ busy: false, err: "", done: true });
     } catch { setState({ busy: false, err: "Send failed — try again.", done: false }); }
   };
-  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: 8, padding: "8px 11px" };
+  const ro = { fontSize: 13, fontFamily: MONO, color: C.ink, background: C.lineSoft, borderRadius: rad(8), padding: "8px 11px" };
   return (
     <Modal title={`Resend to ${cand.email || "contact"}`} onClose={onClose} blueHeader tall>
       {!lastComm && <div style={{ fontSize: 13, color: C.sub, marginBottom: 12 }}>No previously-sent email to resend.</div>}
@@ -2662,7 +2981,7 @@ function ResendModal({ client, cand, lastComm, onClose, onLog }) {
           </>
         ) : (
           <>
-            <button onClick={sendNow} disabled={state.busy || !cand.email} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, border: "none", background: state.busy || !cand.email ? C.grey : C.action, color: "#fff", cursor: state.busy || !cand.email ? "default" : "pointer" }}>
+            <button onClick={sendNow} disabled={state.busy || !cand.email} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: rad(8), border: "none", background: state.busy || !cand.email ? C.grey : C.action, color: "#fff", cursor: state.busy || !cand.email ? "default" : "pointer" }}>
               {state.busy ? "Sending…" : "Send via Brevo"}
             </button>
             <GhostBtn onClick={onClose}>Cancel</GhostBtn>
@@ -2703,6 +3022,7 @@ function sentInRound(c, cp, round) {
   return best;
 }
 function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, signatureImage, onUpdateWithLog, onUpdateSettings }) {
+  const look = useLook();
   const [type, setType] = useState("reminder");
   const [selId, setSelId] = useState(null);
   const [aud, setAud] = useState("auto"); // auto | bill:<status> | grp:maritz | grp:viper | camp:<id>
@@ -2809,11 +3129,42 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
     deletion: "accounts marked for suspension",
   }[type] || "all contactable clients";
 
+  // Studio: the compose / campaigns / sent views are the notch tabs.
+  const studioWrap = (body, sub) => (
+    <NotchPanel title="Email desk" sub={sub} active={view} onTab={setView}
+      tabs={[{ key: "compose", label: "Queue", count: fullAudience.length - fullAudience.filter((c) => (camp ? sentInRound(c, camp, curRound) : periodSent(c))).length }, { key: "campaigns", label: "Campaigns", count: activeCampaigns.length }, { key: "sent", label: "Sent", count: sentEmails.length }]}>
+      {body}
+    </NotchPanel>
+  );
+  const whiteCard = (children, pad = 18) => <div style={{ background: C.panel, color: C.ink, borderRadius: rad(14), padding: pad }}>{children}</div>;
+
   if (view === "campaigns") {
-    return <CampaignsPanel campaigns={campaigns} clients={clients} templates={templates} onSave={saveCampaigns}
+    const panel = <CampaignsPanel campaigns={campaigns} clients={clients} templates={templates} onSave={saveCampaigns}
       onBack={() => setView("compose")} onSendRound={(id) => { setAud(`camp:${id}`); setView("compose"); }} />;
+    return look.studio ? studioWrap(whiteCard(panel), "Letter rounds sent to a frozen audience") : panel;
   }
 
+  if (view === "sent" && look.studio) {
+    const shown = sentFiltered.slice(0, 150);
+    return (
+      <div>
+        <StudioFilterBar search={sq} onSearch={setSq} placeholder="Search sent emails">
+          <span style={{ fontSize: 12.5, color: C.sub }}>{sq.trim() ? `${sentFiltered.length} of ${sentEmails.length}` : sentEmails.length} sent</span>
+        </StudioFilterBar>
+        {studioWrap(whiteCard(shown.length === 0
+          ? <div style={{ padding: 30, textAlign: "center", color: C.sub, fontSize: 14 }}>{sq.trim() ? `No sent emails match “${sq.trim()}”.` : "No emails sent yet — copies appear here after you send."}</div>
+          : <>
+              {shown.map(({ c, k, v }) => (
+                <div key={`${c.id}:${k}`} style={{ borderBottom: `1px solid ${C.lineSoft}`, padding: "10px 6px 6px" }}>
+                  <button onClick={() => onOpen?.(c.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13.5, fontWeight: 700, color: C.ink }}>{c.company || c.name}</button>
+                  <SentCommRow tKey={k} v={v} />
+                </div>
+              ))}
+              {sentFiltered.length > shown.length && <p style={{ fontSize: 12, color: C.faint, textAlign: "center", margin: "12px 0 0" }}>Showing the {shown.length} most recent — search to narrow the rest.</p>}
+            </>, 12), "Every email sent from the CRM, newest first")}
+      </div>
+    );
+  }
   if (view === "sent") {
     const shown = sentFiltered.slice(0, 150);
     return (
@@ -2821,19 +3172,19 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 14 }}>
           <GhostBtn onClick={() => setView("compose")}>← Back to compose</GhostBtn>
           <input value={sq} onChange={(e) => setSq(e.target.value)} placeholder="Search sent emails" autoFocus
-            style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${sq.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
+            style={{ fontSize: 13, padding: "7px 11px", borderRadius: rad(8), border: `1px solid ${sq.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 220 }} />
           <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
             {sq.trim() ? `${sentFiltered.length} of ${sentEmails.length}` : sentEmails.length} sent
           </span>
         </div>
         {shown.length === 0 ? (
-          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+          <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
             {sq.trim() ? `No sent emails match “${sq.trim()}”.` : "No emails sent yet — copies appear here after you send."}
           </div>
         ) : (
           <div style={{ maxWidth: 760 }}>
             {shown.map(({ c, k, v }) => (
-              <div key={`${c.id}:${k}`} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 10, padding: "8px 14px 4px", marginBottom: 8 }}>
+              <div key={`${c.id}:${k}`} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(10), padding: "8px 14px 4px", marginBottom: 8 }}>
                 <button onClick={() => onOpen?.(c.id)} title="Open client"
                   style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, fontWeight: 700, color: C.ink, textDecoration: "underline", textDecorationColor: C.lineSoft, textUnderlineOffset: 3 }}>
                   {c.company || c.name}
@@ -2846,6 +3197,86 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
             )}
           </div>
         )}
+      </div>
+    );
+  }
+
+  const editorInner = client && (
+    <>
+            <div style={{ marginBottom: 14 }}>
+              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: "#fff", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.4)", textUnderlineOffset: 3 }}>
+                  {client.company || client.name}
+                </button>
+                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
+                <button onClick={() => {
+                  if (camp) markCampDone(camp.id, client.id); // replied/complete — drops out of future rounds
+                  onLogSent(client.id, key, { dismissedAt: new Date().toISOString() });
+                  onUpdateWithLog?.(client.id, { stage: "contacted-awaiting" }, "stage", camp ? `Done in campaign "${camp.name}"` : "Done in Emails, moved to Contacted · awaiting reply");
+                  advance();
+                }} title={camp ? "Mark complete for this campaign (drops out of future rounds)" : "Remove from this list and mark Contacted · awaiting reply"}
+                  style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, padding: "7px 14px", borderRadius: rad(8), border: "none", background: C.green, color: "#fff", cursor: "pointer" }}>
+                  Done ✓
+                </button>
+              </div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
+            </div>
+            {/* Sending auto-dismisses the card, so move straight to the next recipient. */}
+            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} dark
+              officeSiblings={client.officeGroup ? clients.filter((o) => o.id !== client.id && o.officeGroup === client.officeGroup) : []} />
+    </>
+  );
+  const audienceOptions = [
+    ["auto", `Suggested: ${audienceHint}`],
+    ...activeCampaigns.map((cp) => [`camp:${cp.id}`, `Campaign: ${cp.name}`]),
+    ...Object.entries(BILLING).map(([k, v]) => [`bill:${k}`, v.label]),
+    ["grp:maritz", "Maritz Portal customers"],
+    ["grp:viper", "Viper Customers"],
+    ["grp:multi", "Multi-office"],
+  ];
+  if (look.studio) {
+    return (
+      <div>
+        <StudioFilterBar search={q} onSearch={setQ} placeholder="Search companies">
+          <span style={{ fontSize: 12.5, color: C.sub, fontWeight: 600, marginLeft: 6 }}>Audience</span>
+          <MiniSelect value={aud} onChange={setAud} options={audienceOptions} />
+          {camp && curRound
+            ? <MiniPill fg={C.action} bg={C.accentSoft}>Round {camp.rounds.length} · {curRound.label} · {templates[curRound.type]?.label || curRound.type}</MiniPill>
+            : <MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} />}
+        </StudioFilterBar>
+        {studioWrap(!client ? (
+          <div style={{ padding: "40px 12px", textAlign: "center", color: "rgba(255,255,255,0.7)", fontSize: 14 }}>
+            {q.trim() && fullAudience.length ? `No companies match “${q.trim()}” in this list.` : `No eligible recipients${skipped ? ` — ${skipped} were skipped (opted out, bounced, or missing an email)` : " for this selection"}.`}
+          </div>
+        ) : (
+          <div className="st-split" style={{ display: "grid", gridTemplateColumns: "minmax(250px, 0.8fr) minmax(0, 1.5fr)", gap: 16, alignItems: "start" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 700, overflowY: "auto", paddingRight: 4 }}>
+              {audience.map((c) => {
+                const sent = sentOf(c);
+                const behind = arrearsPeriods(c);
+                return (
+                  <DarkRow key={c.id} selected={c.id === client.id} onClick={() => setSelId(c.id)} initials={initialsOf(c.company || c.name)}
+                    title={c.company || c.name} sub={sent ? `Email sent · ${fmtDate(sent)}` : behind >= 1 ? `${behind}p behind` : BILLING[c.billingStatus].label}
+                    status={sent ? "Sent" : "Unsent"} figure={behind >= 1 ? money(totalOwed(c), c.currency || settings.currency) : ""} />
+                );
+              })}
+            </div>
+            <div style={{ background: C.hero, color: "#fff", borderRadius: rad(16), padding: 20, boxShadow: "0 24px 50px -28px rgba(0,0,0,0.7)", minWidth: 0 }}>
+              {editorInner}
+            </div>
+          </div>
+        ), `${sentCount}/${fullAudience.length} sent ${camp ? "this round" : "this month"}${skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}`)}
+      {mailView && (
+        <Modal title={`${mailView.mail?.label || "Email"} · ${mailView.c.company || mailView.c.name}`} onClose={() => setMailView(null)}>
+          <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginBottom: 10 }}>
+            Sent {fmtDate(mailView.mail?.sentAt)}{mailView.mail?.via === "brevo" ? " · Brevo" : ""} · to {mailView.c.email || "—"}
+          </div>
+          <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{mailView.mail?.subject || "(no subject saved)"}</div>
+            <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{mailView.mail?.body || "(message not saved)"}</div>
+          </div>
+        </Modal>
+      )}
       </div>
     );
   }
@@ -2863,12 +3294,12 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
           ["grp:multi", "Multi-office"],
         ]} />
         {camp && curRound ? (
-          <MiniPill fg={C.action} bg="#E7EDF8">Round {camp.rounds.length} · {curRound.label} · {templates[curRound.type]?.label || curRound.type}</MiniPill>
+          <MiniPill fg={C.action} bg={C.accentSoft}>Round {camp.rounds.length} · {curRound.label} · {templates[curRound.type]?.label || curRound.type}</MiniPill>
         ) : (
           <MiniSelect value={type} onChange={setType} options={templateOptionsAlpha(templates)} />
         )}
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies"
-          style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
+          style={{ fontSize: 13, padding: "7px 11px", borderRadius: rad(8), border: `1px solid ${q.trim() ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 180 }} />
         <span style={{ marginLeft: "auto", fontSize: 12.5, color: C.sub, fontFamily: MONO }}>
           {sentCount}/{fullAudience.length} sent {camp ? "this round" : "this month"}{skipped ? ` · ${skipped} skipped (opted out / bounced / no email)` : ""}
         </span>
@@ -2876,7 +3307,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
         <GhostBtn onClick={() => setView("sent")}>Sent emails ({sentEmails.length})</GhostBtn>
       </div>
       {!client ? (
-        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+        <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
           {q.trim() && fullAudience.length
             ? `No companies match “${q.trim()}” in this list.`
             : `No eligible recipients${skipped ? ` — ${skipped} were skipped (opted out, bounced, or missing an email)` : " for this selection"}.`}
@@ -2884,7 +3315,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(210px, 270px) 1fr", gap: 14, alignItems: "start" }}>
           {/* Recipient queue */}
-          <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, overflow: "auto", maxHeight: 640 }}>
+          <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, overflow: "auto", maxHeight: 640 }}>
             {audience.map((c) => {
               const sent = sentOf(c);
               const on = c.id === client.id;
@@ -2911,28 +3342,8 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
             })}
           </div>
           {/* Editor — sits on the board gradient, white text, white inputs */}
-          <div style={{ background: C.boardGradient, borderRadius: 14, padding: 18 }}>
-            <div style={{ marginBottom: 14 }}>
-              <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => onOpen?.(client.id)} title="Open client" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 15, fontWeight: 700, color: "#fff", textDecoration: "underline", textDecorationColor: "rgba(255,255,255,0.4)", textUnderlineOffset: 3 }}>
-                  {client.company || client.name}
-                </button>
-                {esc && <MiniPill fg={esc.level === 3 ? "#fff" : esc.color} bg={esc.level === 3 ? C.red : C.amberBg}>{esc.label} · {arrearsPeriods(client)}p behind{totalOwed(client) > 0 ? ` · ${money(totalOwed(client), client.currency || settings.currency)}` : ""}</MiniPill>}
-                <button onClick={() => {
-                  if (camp) markCampDone(camp.id, client.id); // replied/complete — drops out of future rounds
-                  onLogSent(client.id, key, { dismissedAt: new Date().toISOString() });
-                  onUpdateWithLog?.(client.id, { stage: "contacted-awaiting" }, "stage", camp ? `Done in campaign "${camp.name}"` : "Done in Emails, moved to Contacted · awaiting reply");
-                  advance();
-                }} title={camp ? "Mark complete for this campaign (drops out of future rounds)" : "Remove from this list and mark Contacted · awaiting reply"}
-                  style={{ marginLeft: "auto", fontSize: 13, fontWeight: 600, padding: "7px 14px", borderRadius: 8, border: "none", background: C.green, color: "#fff", cursor: "pointer" }}>
-                  Done ✓
-                </button>
-              </div>
-              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.75)", fontFamily: MONO, marginTop: 2 }}>{client.name} · {SEGMENTS[client.segment].label}</div>
-            </div>
-            {/* Sending auto-dismisses the card, so move straight to the next recipient. */}
-            <EmailEditor key={`${client.id}:${type}`} client={client} settings={settings} type={type} templates={templates} onLogSent={onLogSent} onDone={advance} onSent={onSent} signatureImage={signatureImage} onUpdateWithLog={onUpdateWithLog} dark
-              officeSiblings={client.officeGroup ? clients.filter((o) => o.id !== client.id && o.officeGroup === client.officeGroup) : []} />
+          <div style={{ background: C.boardGradient, borderRadius: rad(14), padding: 18 }}>
+            {editorInner}
           </div>
         </div>
       )}
@@ -2941,7 +3352,7 @@ function CommsTab({ clients, settings, templates, onLogSent, onOpen, onSent, sig
           <div style={{ fontSize: 12, color: C.sub, fontFamily: MONO, marginBottom: 10 }}>
             Sent {fmtDate(mailView.mail?.sentAt)}{mailView.mail?.via === "brevo" ? " · Brevo" : ""} · to {mailView.c.email || "—"}
           </div>
-          <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 12 }}>
+          <div style={{ background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: 12 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>{mailView.mail?.subject || "(no subject saved)"}</div>
             <div style={{ fontSize: 13, whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{mailView.mail?.body || "(message not saved)"}</div>
           </div>
@@ -2991,7 +3402,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
     setRoundFor(null); setRoundLabel("Follow-up letter");
   };
   const bar = (n, total, color) => (
-    <div style={{ flex: 1, height: 7, borderRadius: 7, background: C.lineSoft, overflow: "hidden", minWidth: 80 }}>
+    <div style={{ flex: 1, height: 7, borderRadius: rad(7), background: C.lineSoft, overflow: "hidden", minWidth: 80 }}>
       <div style={{ width: total ? `${Math.round((n / total) * 100)}%` : 0, height: "100%", background: color, transition: "width 0.3s" }} />
     </div>
   );
@@ -3007,7 +3418,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
       </div>
 
       {creating && (
-        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: 16, marginBottom: 14, maxWidth: 560 }}>
+        <div style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(12), padding: 16, marginBottom: 14, maxWidth: 560 }}>
           <Field label="Campaign name"><input style={inputStyle} autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Maritz mail-out — July" /></Field>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label={`Audience · ${audFor(seg).length} contactable`}>
@@ -3030,7 +3441,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
       )}
 
       {list.length === 0 && !creating && (
-        <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
+        <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 40, textAlign: "center", color: C.sub, fontSize: 14 }}>
           No campaigns yet. A campaign tracks a letter sequence (first letter → follow-up → done) across a whole audience, showing who's had which round.
         </div>
       )}
@@ -3041,7 +3452,7 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
         const cur = cp.rounds[cp.rounds.length - 1];
         const remaining = members.filter((c) => !cp.done?.[c.id] && !sentInRound(c, cp, cur)).length;
         return (
-          <div key={cp.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: 12, padding: "14px 16px", marginBottom: 10, opacity: cp.archived ? 0.55 : 1 }}>
+          <div key={cp.id} style={{ background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(12), padding: "14px 16px", marginBottom: 10, opacity: cp.archived ? 0.55 : 1 }}>
             <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
               <span style={{ fontSize: 14.5, fontWeight: 700 }}>{cp.name}</span>
               <span style={{ fontSize: 11.5, color: C.faint, fontFamily: MONO }}>{members.length} members · started {fmtDate(cp.createdAt)}</span>
@@ -3087,7 +3498,11 @@ function CampaignsPanel({ campaigns, clients, templates, onSave, onBack, onSendR
 }
 
 /* ----------------------------- Today tab ----------------------------- */
-function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen }) {
+function DigestTab(props) {
+  const look = useLook();
+  return look.studio ? <StudioToday {...props} /> : <ClassicDigest {...props} />;
+}
+function ClassicDigest({ clients, settings, bounced, replyCount = 0, onGo, onOpen }) {
   const now = new Date();
   const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
   const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
@@ -3110,7 +3525,7 @@ function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen })
   return (
     <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, alignItems: "start" }}>
       {/* Same Trello-blue gradient as the Workflow board */}
-      <div style={{ background: C.boardGradient, borderRadius: 14, padding: 20 }}>
+      <div style={{ background: C.boardGradient, borderRadius: rad(14), padding: 20 }}>
         <h2 style={{ fontSize: 18, fontWeight: 700, margin: "0 0 4px", fontFamily: DISPLAY, color: "#fff" }}>What needs attention</h2>
         <p style={{ fontSize: 13, color: "rgba(255,255,255,0.78)", marginBottom: 16 }}>Live counts — click through to act. Nothing sends without your review.</p>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -3124,7 +3539,7 @@ function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen })
           <Row n={bounced} label="Bounced contacts to recover" tint={C.red} to="recovery" />
         </div>
       </div>
-      <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20 }}>
+      <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 20 }}>
         <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 2 }}>Follow-ups</h3>
         <p style={{ fontSize: 11.5, color: C.faint, marginBottom: 10 }}>Clients you need to contact or are awaiting a reply from — plus any with a follow-up date set. Click to open.</p>
         {followUps.length === 0 && <div style={{ fontSize: 12.5, color: C.faint }}>Nothing to follow up — every client is up to date or on hold.</div>}
@@ -3140,6 +3555,138 @@ function DigestTab({ clients, settings, bounced, replyCount = 0, onGo, onOpen })
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+// Studio "Today": a notched dark worklist with the selected client's
+// summary in the Blue 800 panel (the reference's invoice list + detail),
+// then the same attention counts as Classic, as tiles.
+function StudioToday({ clients, settings, bounced, replyCount = 0, onGo, onOpen, onEmail }) {
+  const now = new Date();
+  const cur = settings.currency;
+  const reminderList = clients.filter((c) => needsReminder(c, now) && c.emailStatus === "ok" && !c.tags.includes("opted-out"));
+  const finals = reminderList.filter((c) => arrearsPeriods(c, now) >= 3);
+  const activeC = clients.filter((c) => !c.archivedClient && !c.formerCustomer && !coveredByGroup(c));
+  const lists = {
+    follow: clients.filter((c) => needsFollowUp(c, now)).sort((a, b) => (followUpDue(b, now) - followUpDue(a, now)) || STAGES[a.stage].order - STAGES[b.stage].order),
+    owing: activeC.filter((c) => arrearsPeriods(c, now) >= 1).sort((a, b) => totalOwed(b, now) - totalOwed(a, now)),
+    bounced: clients.filter((c) => c.emailStatus !== "ok"),
+  };
+  const [view, setView] = useState("follow");
+  const [selId, setSelId] = useState(null);
+  const list = lists[view];
+  const sel = list.find((c) => c.id === selId) || list[0];
+  const tiles = [
+    ["mail", reminderList.length, "Payment reminders to send", "comms"],
+    ["alert", finals.length, "Final notices (3+ periods behind)", "comms"],
+    ["bell", activeC.filter((c) => c.stage === "need-to-contact").length, "Need to contact", "workflow"],
+    ["clock", activeC.filter((c) => c.stage === "contacted-awaiting").length, "Awaiting reply", "workflow"],
+    ["pricing", clients.filter((c) => c.billingStatus === "old-pricing" && !c.tags.includes("price-declined")).length, "Old pricing — notices to send", "comms"],
+    ["replies", replyCount, "Client replies waiting", "replies"],
+    ["recovery", clients.filter((c) => c.candidates?.length > 0).length, "Recovered contacts awaiting approval", "recovery"],
+    ["mailx", bounced, "Bounced contacts to recover", "recovery"],
+  ];
+  const statusOf = (c) => view === "bounced" ? "Bounced" : view === "owing" ? `${arrearsPeriods(c, now)}p behind` : followUpDue(c, now) ? "Due" : STAGES[c.stage].label.split(" ·")[0];
+  const figureOf = (c) => coveredByGroup(c) ? "via group" : totalOwed(c, now) > 0 ? money(totalOwed(c, now), c.currency || cur) : Number(c.amount) > 0 ? money(c.amount, c.currency || cur) : "—";
+  const figureSubOf = (c) => totalOwed(c, now) > 0 ? "owed" : Number(c.amount) > 0 ? (c.cadence === "annual" ? "per year" : "per month") : "";
+  const label = { fontSize: 12, color: "rgba(255,255,255,0.7)", marginBottom: 6 };
+  return (
+    <div style={{ display: "grid", gap: 22 }}>
+      <NotchPanel title="Client worklist" sub="Pick a client to see where they stand"
+        tabs={[{ key: "follow", label: "Follow-ups", count: lists.follow.length }, { key: "owing", label: "Owing", count: lists.owing.length }, { key: "bounced", label: "Bounced", count: lists.bounced.length }]}
+        active={view} onTab={(k) => { setView(k); setSelId(null); }}
+        right={<><IconCircle dark icon="users" title="Open the client list" onClick={() => onGo("clients")} /><IconCircle dark icon="mail" title="Open the email queue" onClick={() => onGo("comms")} /></>}>
+        {list.length === 0 ? (
+          <div style={{ padding: "40px 12px", textAlign: "center", color: "rgba(255,255,255,0.65)", fontSize: 13.5 }}>
+            {view === "follow" ? "Nothing to follow up — every client is up to date or on hold." : view === "owing" ? "No client is behind on payments." : "No bounced contacts."}
+          </div>
+        ) : (
+          <div className="st-split" style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.3fr)", gap: 16, alignItems: "stretch" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 460, overflowY: "auto", paddingRight: 4 }}>
+              {list.map((c) => (
+                <DarkRow key={c.id} selected={sel && c.id === sel.id} onClick={() => setSelId(c.id)} initials={initialsOf(c.company || c.name)}
+                  title={c.company || c.name} sub={followUpDue(c, now) ? `Follow up ${fmtDate(c.followUp)}` : c.name || SEGMENTS[c.segment].label}
+                  status={statusOf(c)} figure={figureOf(c)} figureSub={figureSubOf(c)} />
+              ))}
+            </div>
+            {sel && (
+              <div style={{ background: C.hero, color: "#fff", borderRadius: rad(16), padding: "22px 22px 18px", display: "flex", flexDirection: "column", gap: 18, boxShadow: "0 24px 50px -28px rgba(0,0,0,0.7)", minWidth: 0 }}>
+                <div className="st-hero-top" style={{ display: "grid", gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr)", gap: 16 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={label}>Client details</div>
+                    <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ fontFamily: DISPLAY, fontSize: 24, fontWeight: 500, lineHeight: 1.15, overflow: "hidden", textOverflow: "ellipsis" }}>{sel.company || sel.name}</span>
+                    </div>
+                    <span style={{ display: "inline-block", marginTop: 8, fontSize: 11.5, fontWeight: 600, padding: "4px 10px", borderRadius: 999, background: "rgba(255,255,255,0.14)" }}>{BILLING[sel.billingStatus].label}</span>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={label}>Segment</div>
+                    <div style={{ fontSize: 14.5, fontWeight: 600 }}>{SEGMENTS[sel.segment].label}</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.7)", marginTop: 4 }}>{sel.chargeoverId ? `ChargeOver #${sel.chargeoverId}` : "Not in ChargeOver"}</div>
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={label}>Contact</div>
+                    <div className="flex items-center" style={{ gap: 10, minWidth: 0 }}>
+                      <span style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12.5, fontWeight: 700, flexShrink: 0 }}>{initialsOf(sel.name || sel.email)}</span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sel.name || "—"}</span>
+                        <span style={{ display: "block", fontSize: 11.5, color: "rgba(255,255,255,0.72)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sel.email || "no email"}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10 }}>
+                  <HeroTile label="Owed now" value={coveredByGroup(sel) ? "via group" : money(totalOwed(sel, now), sel.currency || cur)} />
+                  <HeroTile label={sel.cadence === "annual" ? "Annual rate" : "Monthly rate"} value={Number(sel.amount) > 0 ? money(sel.amount, sel.currency || cur) : "—"} />
+                  <HeroTile label="Periods behind" value={String(arrearsPeriods(sel, now))} />
+                  <button type="button" onClick={() => onOpen(sel.id)} style={{ border: "1.5px dashed rgba(255,255,255,0.4)", borderRadius: rad(12), background: "transparent", color: "#fff", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, padding: 14, fontSize: 12 }}>
+                    <MenuIcon name="add" size={18} color="#fff" />Add a note
+                  </button>
+                </div>
+                <div className="flex flex-wrap items-center" style={{ gap: 18, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.2)", marginTop: "auto" }}>
+                  {[["Stage", STAGES[sel.stage].label], ["Last paid", fmtDate(lastPaymentDate(sel))], ["Follow up", sel.followUp ? fmtDate(sel.followUp) : "Not set"]].map(([l, v]) => (
+                    <div key={l} style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.7)" }}>{l}</div>
+                      <div style={{ fontSize: 14.5, fontWeight: 600, marginTop: 3, whiteSpace: "nowrap" }}>{v}</div>
+                    </div>
+                  ))}
+                  <div className="flex items-center" style={{ gap: 8, marginLeft: "auto" }}>
+                    {onEmail && <IconCircle dark icon="mail" title={`Email ${sel.company || sel.name}`} onClick={() => onEmail(sel.id, "reminder")} />}
+                    <IconCircle dark icon="link" title="Open in a new tab" onClick={() => window.open(`?client=${sel.id}`, "_blank")} />
+                    <button type="button" onClick={() => onOpen(sel.id)} style={{ padding: "12px 20px", borderRadius: 999, border: "none", background: "#fff", color: C.brand, fontSize: 13.5, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>Open client card</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </NotchPanel>
+
+      <section>
+        <div className="flex items-end justify-between" style={{ gap: 12, marginBottom: 14 }}>
+          <div>
+            <h2 style={{ fontFamily: DISPLAY, fontSize: 22, fontWeight: 500, color: C.ink }}>What needs attention</h2>
+            <p style={{ fontSize: 13, color: C.faint, marginTop: 3 }}>Live counts — click through to act. Nothing sends without your review.</p>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14 }}>
+          {tiles.map(([icon, n, text, to]) => (
+            <button key={text} type="button" onClick={() => onGo(to)}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")} onMouseLeave={(e) => (e.currentTarget.style.transform = "none")}
+              style={{ textAlign: "left", cursor: "pointer", background: C.panel, border: `1px solid ${C.lineSoft}`, borderRadius: rad(14), padding: 18, boxShadow: T.shCard, color: C.ink, display: "flex", alignItems: "center", gap: 14, transition: "transform 0.15s" }}>
+              <span style={{ width: 46, height: 46, borderRadius: rad(10), flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: n ? C.hero : C.lineSoft, boxShadow: n ? `0 10px 20px -12px ${C.action}` : "none" }}>
+                <MenuIcon name={icon} size={21} color={n ? "#fff" : C.faint} />
+              </span>
+              <span style={{ minWidth: 0 }}>
+                <span style={{ display: "block", fontFamily: DISPLAY, fontSize: 26, fontWeight: 500, lineHeight: 1 }}>{n}</span>
+                <span style={{ display: "block", fontSize: 12.5, color: C.sub, marginTop: 5, lineHeight: 1.3 }}>{text}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
@@ -3162,9 +3709,9 @@ function PastCharges({ client, state }) {
     <Section title="Past charges (ChargeOver)" action={state.invoices.length > 0 ? <CopyLink getText={copyText} /> : null}>
       {/* upcoming invoice from the active ChargeOver billing package */}
       {state.next?.date && (
-        <div className="flex items-baseline justify-between" style={{ gap: 8, background: "#E7EDF8", borderRadius: 8, padding: "8px 12px", marginBottom: 8 }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: "#3B5BA5" }}>Next invoice · {fmtDate(state.next.date)}</span>
-          <span style={{ fontSize: 14, fontWeight: 700, fontFamily: MONO, color: "#3B5BA5" }}>{money(state.next.amount, client.currency || "USD")}</span>
+        <div className="flex items-baseline justify-between" style={{ gap: 8, background: C.accentSoft, borderRadius: rad(8), padding: "8px 12px", marginBottom: 8 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: C.catBlue }}>Next invoice · {fmtDate(state.next.date)}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, fontFamily: MONO, color: C.catBlue }}>{money(state.next.amount, client.currency || "USD")}</span>
         </div>
       )}
       {client.coBalance != null && (
@@ -3280,6 +3827,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [sc, setSc] = useState({ name: "", email: "", phone: "", role: "" });
   const [dtab, setDtab] = useState("info"); // info | billing | portal
+  const look = useLook();
   const cur = client.currency || settings.currency;
   const behind = arrearsPeriods(client);
   const sentComms = Object.entries(client.reminders || {}).filter(([, v]) => v.sentAt);
@@ -3311,10 +3859,10 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
     // Backdrops close on a press that STARTS on them — not onClick, which also
     // fires when a text-selection drag from inside ends past the panel edge
     // (the "abrupt close while selecting" bug). Same fix in confirm + Modal.
-    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, width: "100%", maxWidth: 640, maxHeight: "100%", borderRadius: 16, overflow: "auto", boxShadow: "0 30px 80px rgba(34,48,76,0.35)" }}>
+    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: look.studio ? "rgba(8,12,22,0.5)" : "rgba(34,48,76,0.45)", backdropFilter: look.studio ? "blur(6px)" : undefined, WebkitBackdropFilter: look.studio ? "blur(6px)" : undefined, zIndex: 50, padding: "clamp(12px, 4vh, 40px) 16px" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.paper, color: C.ink, width: "100%", maxWidth: look.studio ? 700 : 640, maxHeight: "100%", borderRadius: rad(16), overflow: "auto", boxShadow: look.studio ? T.shPop : "0 30px 80px rgba(34,48,76,0.35)" }}>
         {/* Card header on the board gradient — white title/controls, same glass tabs as the main page */}
-        <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.boardGradient, borderBottom: `1px solid ${C.line}` }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 1, background: C.boardGradient, borderBottom: look.studio ? "none" : `1px solid ${C.line}` }}>
         <div className="flex items-center justify-between" style={{ padding: "14px 20px 8px", gap: 12 }}>
           <div style={{ minWidth: 0 }}>
             <h2 style={{ fontSize: 21, fontWeight: 700, fontFamily: DISPLAY, letterSpacing: "-0.01em", color: "#fff" }}>
@@ -3322,7 +3870,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
               <span style={{ marginLeft: 8 }}>{client.company || client.name}</span>
               <CopyNameBtn text={client.company || client.name} light />
               {client.archivedClient ? <span style={{ fontSize: 11, fontWeight: 500, color: "rgba(255,255,255,0.7)", marginLeft: 6, verticalAlign: "middle" }}>· archived</span> : ""}
-              {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: 20, marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
+              {client.formerCustomer ? <span style={{ fontSize: 11, fontWeight: 700, color: C.red, background: C.redBg, padding: "2px 8px", borderRadius: rad(20), marginLeft: 8, verticalAlign: "middle" }}>No longer a customer</span> : ""}
             </h2>
             {behind >= 1 && <div style={{ fontSize: 12, color: "#FFB4AD", fontWeight: 600 }}>{behind} period{behind > 1 ? "s" : ""} behind · owes {money(totalOwed(client), cur)}</div>}
             {/* Office inside a group: one click back to the group billing card */}
@@ -3330,7 +3878,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
               const master = officeSiblings.find((o) => o.groupBillingMaster);
               return master ? (
                 <button onClick={() => onOpen?.(master.id)}
-                  style={{ background: "#E7EDF8", border: "none", color: "#3B5BA5", fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: 20, cursor: "pointer", marginTop: 4 }}>
+                  style={{ background: C.accentSoft, border: "none", color: C.catBlue, fontSize: 11.5, fontWeight: 700, padding: "3px 10px", borderRadius: rad(20), cursor: "pointer", marginTop: 4 }}>
                   ← Back to {master.company || client.officeGroup} group
                 </button>
               ) : null;
@@ -3349,12 +3897,21 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
             <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: "rgba(255,255,255,0.85)", cursor: "pointer" }}>✕</button>
           </div>
         </div>
-        {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page */}
+        {/* Card tabs: Info / Emails / Billing / Portal — same raised-tab design as the main page
+            (Studio: a tray cut up into the header, opening onto the card body) */}
+        {look.studio ? (
+          <div className="flex" style={{ justifyContent: "center", paddingTop: 6 }}>
+            <NotchTray bg={C.paper} edge="bottom">
+              <NotchTabs active={dtab} onTab={setDtab} tabs={[{ key: "info", label: "Info" }, { key: "emails", label: "Emails", count: sentComms.length || null }, { key: "billing", label: "Billing" }, { key: "portal", label: "Portal" }]} />
+            </NotchTray>
+          </div>
+        ) : (
         <div className="flex items-end" style={{ gap: 8, padding: "6px 20px 0" }}>
           {[["info", "Info", "info"], ["emails", "Emails", "mail"], ["billing", "Billing", "billing"], ["portal", "Portal", "portal"]].map(([k, t, ic]) => (
             <Tab key={k} icon={ic} active={dtab === k} onClick={() => setDtab(k)}>{t}</Tab>
           ))}
         </div>
+        )}
         </div>
         <div style={{ padding: "16px 20px 20px" }}>
           {dtab === "info" && (<>
@@ -3398,7 +3955,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
 
           {/* Multi-office group */}
           {client.multiOffice && (
-            <div style={{ background: C.panel, borderRadius: 10, border: `1px solid ${C.line}`, padding: "10px 12px", marginBottom: 12 }}>
+            <div style={{ background: C.panel, borderRadius: rad(10), border: `1px solid ${C.line}`, padding: "10px 12px", marginBottom: 12 }}>
               <div className="flex items-center justify-between" style={{ gap: 8 }}>
                 <span style={{ fontSize: 12.5 }}><span style={{ fontWeight: 700 }}>Multi-office</span> · group <span style={{ fontWeight: 600, color: C.action }}>{client.officeGroup || "—"}</span></span>
                 <span style={{ fontSize: 11.5, fontWeight: 600, color: client.priceMode === "group" ? C.action : C.sub }}>{client.priceMode === "group" ? "Group price" : "Per-office"}</span>
@@ -3426,7 +3983,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           <div className="flex" style={{ flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
             {Object.entries(TAGS).map(([k, v]) => {
               const on = client.tags.includes(k);
-              return <button key={k} onClick={() => toggleTag(k)} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: 20, cursor: "pointer", border: `1px solid ${on ? v.color : C.line}`, background: on ? v.color : C.panel, color: on ? "#fff" : C.sub }}>{v.label}</button>;
+              return <button key={k} onClick={() => toggleTag(k)} style={{ fontSize: 12, fontWeight: 600, padding: "6px 11px", borderRadius: rad(20), cursor: "pointer", border: `1px solid ${on ? v.color : C.line}`, background: on ? v.color : C.panel, color: on ? "#fff" : C.sub }}>{v.label}</button>;
             })}
           </div>
 
@@ -3652,7 +4209,7 @@ function DetailDrawer({ client: rawClient, settings, onClose, onUpdate, onUpdate
           {/* Centered confirm — a small dialog so it's never cut off at the drawer's foot */}
           {confirmDelete && (
             <div onMouseDown={(e) => { if (e.target === e.currentTarget) setConfirmDelete(false); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.5)", zIndex: 60, padding: 16 }}>
-              <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 14, padding: "20px 22px", width: "100%", maxWidth: 380, boxShadow: "0 24px 60px rgba(34,48,76,0.32)" }}>
+              <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: rad(14), padding: "20px 22px", width: "100%", maxWidth: 380, boxShadow: "0 24px 60px rgba(34,48,76,0.32)" }}>
                 <div style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, marginBottom: 6 }}>Delete permanently?</div>
                 <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.5, marginBottom: 18 }}>
                   <strong style={{ color: C.ink }}>{client.company || client.name}</strong> will be removed for good. This can't be undone — Archive is the reversible option.
@@ -3694,7 +4251,7 @@ function NotesSection({ client, onUpdate, userName }) {
         <SolidBtn onClick={save}>Save</SolidBtn>
       </div>
       {cards.map((n) => (
-        <div key={n.id} style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 30px 10px 12px", marginBottom: 8 }}>
+        <div key={n.id} style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(10), padding: "10px 30px 10px 12px", marginBottom: 8 }}>
           <button onClick={() => onUpdate({ noteCards: cards.filter((x) => x.id !== n.id) })} title="Delete note" aria-label="Delete note"
             style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }}>✕</button>
           <div style={{ fontSize: 11, color: C.faint, fontFamily: MONO, marginBottom: 4 }}>{fmtDate(n.at)}{n.by ? ` · ${n.by}` : ""}</div>
@@ -3723,7 +4280,7 @@ function ActivityRow({ a, client }) {
         </button>
       )}
       {open && viewable && (
-        <div style={{ marginTop: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontSize: 12.5 }}>
+        <div style={{ marginTop: 6, background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: 10, fontSize: 12.5 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{mail.subject || "(no subject saved)"}</div>
           <div style={{ whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{mail.body || "(message not saved)"}</div>
         </div>
@@ -3743,7 +4300,7 @@ function SentCommRow({ tKey, v }) {
         <span style={{ fontFamily: MONO, color: C.sub, fontSize: 12, flexShrink: 0, marginLeft: 8 }}>{fmtDate(v.sentAt)} {open ? "▴" : "▾"}</span>
       </button>
       {open && (
-        <div style={{ marginTop: 8, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: 10, fontSize: 12.5 }}>
+        <div style={{ marginTop: 8, background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: 10, fontSize: 12.5 }}>
           <div style={{ fontWeight: 700, marginBottom: 4 }}>{v.subject || "(no subject saved)"}</div>
           <div style={{ whiteSpace: "pre-wrap", color: C.sub, lineHeight: 1.5 }}>{v.body || "(message not saved — sent before this was tracked)"}</div>
         </div>
@@ -3770,7 +4327,7 @@ function Conversation({ client }) {
     <Section title={`Conversation · ${msgs.length}`}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {msgs.map((m) => (
-          <div key={m.id} style={{ background: m.direction === "in" ? C.paper : "#E7EDF8", borderRadius: 8, padding: "9px 11px" }}>
+          <div key={m.id} style={{ background: m.direction === "in" ? C.paper : C.accentSoft, borderRadius: rad(8), padding: "9px 11px" }}>
             <div className="flex items-center" style={{ gap: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: m.direction === "in" ? C.ink : C.action }}>
                 {m.direction === "in" ? m.fromEmail : "We sent"}
@@ -3789,7 +4346,7 @@ function Conversation({ client }) {
 
 function Section({ title, action, children }) {
   return (
-    <div style={{ background: C.panel, borderRadius: 12, border: `1px solid ${C.line}`, padding: 14, marginBottom: 14 }}>
+    <div style={{ background: C.panel, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: 14, marginBottom: 14 }}>
       <div className="flex items-center justify-between" style={{ marginBottom: 8, gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: C.ink }}>{title}</div>
         {action}
@@ -3855,7 +4412,7 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
   const delRow = (i) => setDraft((d) => d.filter((_, k) => k !== i));
   const save = () => { onSaveEdit(draft.filter((u) => u.some((c) => (c || "").trim()))); setDraft(null); };
   return (
-    <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 12px", marginBottom: 8, opacity: list.archived ? 0.6 : 1 }}>
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: rad(10), padding: "10px 12px", marginBottom: 8, opacity: list.archived ? 0.6 : 1 }}>
       <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
         <button onClick={() => setOpen((o) => !o)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 700, color: C.ink }}>
           {open ? "▾" : "▸"} Collected {fmtDate(list.collectedAt)}
@@ -3868,7 +4425,7 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
         <div className="flex items-center" style={{ gap: 6, marginLeft: "auto" }}>
           {draft ? (
             <>
-              <button onClick={save} style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: C.action, border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>Save changes</button>
+              <button onClick={save} style={{ fontSize: 11.5, fontWeight: 700, color: "#fff", background: C.action, border: "none", borderRadius: rad(6), padding: "4px 10px", cursor: "pointer" }}>Save changes</button>
               <button onClick={() => setDraft(null)} style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, background: "none", border: "none", cursor: "pointer" }}>Cancel</button>
             </>
           ) : (
@@ -3897,10 +4454,10 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
                   {USERLIST_VIEW.map((j) => (
                     <td key={j} style={{ padding: draft ? "2px 4px" : "4px 8px", borderBottom: `1px solid ${C.lineSoft}`, color: u[j] && u[j] !== "-" ? C.ink : C.faint, whiteSpace: "nowrap", opacity: !draft && isReportingOnly(client, u) ? 0.65 : 1 }}>
                       {draft
-                        ? <input value={u[j] ?? ""} onChange={(e) => editCell(i, j, e.target.value)} style={{ fontSize: 11.5, padding: "3px 5px", borderRadius: 5, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, width: j === LAST_LOGIN_IDX ? 130 : j === 0 ? 130 : 100 }} />
+                        ? <input value={u[j] ?? ""} onChange={(e) => editCell(i, j, e.target.value)} style={{ fontSize: 11.5, padding: "3px 5px", borderRadius: rad(5), border: `1px solid ${C.line}`, background: C.panel, color: C.ink, width: j === LAST_LOGIN_IDX ? 130 : j === 0 ? 130 : 100 }} />
                         : (u[j] && u[j] !== "-" ? u[j] : "—")}
                       {!draft && j === 0 && isReportingOnly(client, u) && (
-                        <span title="Reporting access only — excluded from the billable user count" style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 4, padding: "1px 4px", verticalAlign: "middle" }}>reporting only</span>
+                        <span title="Reporting access only — excluded from the billable user count" style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, color: C.sub, border: `1px solid ${C.line}`, borderRadius: rad(4), padding: "1px 4px", verticalAlign: "middle" }}>reporting only</span>
                       )}
                     </td>
                   ))}
@@ -3909,7 +4466,7 @@ function UserListBlock({ client, list, onArchive, onDelete, onSaveEdit }) {
               ))}
             </tbody>
           </table>
-          {draft && <button onClick={addRow} style={{ marginTop: 8, fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: `1px dashed ${C.line}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer" }}>+ Add user</button>}
+          {draft && <button onClick={addRow} style={{ marginTop: 8, fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: `1px dashed ${C.line}`, borderRadius: rad(6), padding: "5px 10px", cursor: "pointer" }}>+ Add user</button>}
         </div>
       )}
     </div>
@@ -3998,7 +4555,7 @@ function ViperSubscription({ client, settings, onUpdateSettings, onUpdate }) {
           const on = (client.viperCadence || "monthly") === k;
           return (
             <button key={k} onClick={() => onUpdate?.({ viperCadence: k })}
-              style={{ fontSize: 12, fontWeight: 600, padding: "5px 14px", borderRadius: 20, cursor: "pointer", border: `1px solid ${on ? C.action : C.line}`, background: on ? C.action : C.panel, color: on ? "#fff" : C.sub }}>
+              style={{ fontSize: 12, fontWeight: 600, padding: "5px 14px", borderRadius: rad(20), cursor: "pointer", border: `1px solid ${on ? C.action : C.line}`, background: on ? C.action : C.panel, color: on ? "#fff" : C.sub }}>
               {label}
             </button>
           );
@@ -4044,11 +4601,11 @@ function IconTip({ label, onClick, children }) {
   return (
     <span style={{ position: "relative", display: "inline-flex", flexShrink: 0 }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
       <button onClick={onClick} aria-label={label}
-        style={{ border: "none", cursor: "pointer", color: hov ? C.action : C.sub, padding: 3, display: "inline-flex", borderRadius: 6, background: hov ? C.lineSoft : "transparent" }}>
+        style={{ border: "none", cursor: "pointer", color: hov ? C.action : C.sub, padding: 3, display: "inline-flex", borderRadius: rad(6), background: hov ? C.lineSoft : "transparent" }}>
         {children}
       </button>
       {hov && (
-        <span style={{ position: "absolute", bottom: "calc(100% + 6px)", right: 0, whiteSpace: "nowrap", background: C.ink, color: "#fff", fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: 6, boxShadow: "0 6px 16px rgba(34,48,76,0.28)", zIndex: 5, pointerEvents: "none" }}>
+        <span style={{ position: "absolute", bottom: "calc(100% + 6px)", right: 0, whiteSpace: "nowrap", background: C.ink, color: "#fff", fontSize: 11, fontWeight: 600, padding: "4px 8px", borderRadius: rad(6), boxShadow: "0 6px 16px rgba(34,48,76,0.28)", zIndex: 5, pointerEvents: "none" }}>
           {label}
         </span>
       )}
@@ -4082,9 +4639,9 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
   if (isGroup && !master) {
     return (
       <Section title={`Multi-office · ${client.officeGroup || "group"}`}>
-        <div style={{ background: "#E7EDF8", borderRadius: 8, padding: "10px 12px", fontSize: 12.5, color: "#3B5BA5" }}>
+        <div style={{ background: C.accentSoft, borderRadius: rad(8), padding: "10px 12px", fontSize: 12.5, color: C.catBlue }}>
           <span style={{ fontWeight: 700 }}>Billing handled by the group card</span>
-          {masterCard && <> · <button onClick={() => onOpen?.(masterCard.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "#3B5BA5", fontWeight: 700, textDecoration: "underline", fontSize: 12.5 }}>{masterCard.company}</button></>}
+          {masterCard && <> · <button onClick={() => onOpen?.(masterCard.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: C.catBlue, fontWeight: 700, textDecoration: "underline", fontSize: 12.5 }}>{masterCard.company}</button></>}
           . This office owes nothing on its own.
         </div>
       </Section>
@@ -4105,7 +4662,7 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
           </div>
           {Number(client.amount) !== suggested && (
             <button onClick={() => onUpdate(client.id, { amount: suggested })}
-              style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", marginBottom: 6 }}>
+              style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: "5px 10px", cursor: "pointer", marginBottom: 6 }}>
               Apply tier price to Amount ({money(suggested, "USD")})
             </button>
           )}
@@ -4125,15 +4682,15 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
       <div style={{ fontSize: 11.5, fontWeight: 600, color: C.sub, margin: "8px 0 4px" }}>{master ? "Offices covered by this group price" : "Offices in this group"}</div>
       {officeSiblings.length === 0 && <div style={{ fontSize: 12, color: C.faint }}>No other offices linked to “{client.officeGroup}”.</div>}
       {officeSiblings.map((o) => (
-        <div key={o.id} className="flex items-center" style={{ gap: 8, padding: "6px 8px", background: C.paper, border: `1px solid ${C.lineSoft}`, borderRadius: 8, marginBottom: 4 }}>
+        <div key={o.id} className="flex items-center" style={{ gap: 8, padding: "6px 8px", background: C.paper, border: `1px solid ${C.lineSoft}`, borderRadius: rad(8), marginBottom: 4 }}>
           <button onClick={() => onOpen?.(o.id)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: C.ink, textAlign: "left", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title="Open this office">
             {o.company}
           </button>
           <button onClick={() => onOpen?.(o.id)} title={`${o.inChargeOver ? "In ChargeOver" : "Not in ChargeOver"} · ${BILLING[o.billingStatus]?.label || ""} — open office`}
-            style={{ background: o.inChargeOver ? C.greenBg : C.greyBg, color: o.inChargeOver ? C.green : C.faint, border: "none", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 20, cursor: "pointer", flexShrink: 0 }}>
+            style={{ background: o.inChargeOver ? C.greenBg : C.greyBg, color: o.inChargeOver ? C.green : C.faint, border: "none", fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: rad(20), cursor: "pointer", flexShrink: 0 }}>
             {o.inChargeOver ? "CO ✓" : "no CO"}
           </button>
-          {o.groupBillingMaster && <MiniPill fg="#3B5BA5" bg="#E7EDF8">group card</MiniPill>}
+          {o.groupBillingMaster && <MiniPill fg={C.catBlue} bg={C.accentSoft}>group card</MiniPill>}
           <IconTip label="Remove from Grouping" onClick={() => removeFromGroup(o)}>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M8 12h8M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" /></svg>
           </IconTip>
@@ -4141,7 +4698,7 @@ function GroupBilling({ client, settings, officeSiblings = [], onUpdate, onUpdat
       ))}
       {onManage && (
         <button onClick={onManage}
-          style={{ marginTop: 6, width: "100%", fontSize: 12, fontWeight: 600, color: C.action, background: C.paper, border: `1px dashed ${C.line}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer" }}>
+          style={{ marginTop: 6, width: "100%", fontSize: 12, fontWeight: 600, color: C.action, background: C.paper, border: `1px dashed ${C.line}`, borderRadius: rad(8), padding: "7px 10px", cursor: "pointer" }}>
           + Group offices — add or remove
         </button>
       )}
@@ -4190,10 +4747,10 @@ function GroupOfficesModal({ client, allClients = [], officeSiblings = [], onSav
       <Field label="Group name"><input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Destination Asia" /></Field>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search companies" autoFocus
         style={{ ...inputStyle, marginBottom: 8 }} />
-      <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, maxHeight: 300, overflow: "auto", marginBottom: 12 }}>
+      <div style={{ border: `1px solid ${C.line}`, borderRadius: rad(10), maxHeight: 300, overflow: "auto", marginBottom: 12 }}>
         {list.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: C.faint, textAlign: "center" }}>No companies match “{q.trim()}”.</div>}
         {list.map((c) => (
-          <label key={c.id} className="flex items-center" style={{ gap: 9, padding: "7px 11px", borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", background: sel.has(c.id) ? "#F0F4FA" : "transparent" }}>
+          <label key={c.id} className="flex items-center" style={{ gap: 9, padding: "7px 11px", borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer", background: sel.has(c.id) ? C.lineSoft : "transparent" }}>
             <input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} />
             <span style={{ fontSize: 12.5, fontWeight: 600, color: C.ink, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.company || c.name}</span>
             {c.officeGroup && c.officeGroup !== client.officeGroup && <MiniPill fg={C.amber} bg={C.amberBg}>in “{c.officeGroup}”</MiniPill>}
@@ -4229,7 +4786,7 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
     <Section title="Maritz portal pricing" action={<button onClick={() => setEdit((e) => !e)} style={{ fontSize: 11.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>{edit ? "Done" : "Edit pricing"}</button>}>
       <div className="flex items-center" style={{ gap: 6, marginBottom: 8 }}>
         {["monthly", "annual"].map((cad) => (
-          <button key={cad} onClick={() => onUpdate({ cadence: cad })} style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: 8, cursor: "pointer", border: `1px solid ${cadence === cad ? C.action : C.line}`, background: cadence === cad ? C.action : C.panel, color: cadence === cad ? "#fff" : C.sub }}>
+          <button key={cad} onClick={() => onUpdate({ cadence: cad })} style={{ fontSize: 12, fontWeight: 600, padding: "6px 12px", borderRadius: rad(8), cursor: "pointer", border: `1px solid ${cadence === cad ? C.action : C.line}`, background: cadence === cad ? C.action : C.panel, color: cadence === cad ? "#fff" : C.sub }}>
             {cad === "annual" ? `Annual ${money(p.annual, "USD")}` : `Monthly ${money(p.monthly, "USD")}`}
           </button>
         ))}
@@ -4255,8 +4812,8 @@ function MaritzPricing({ client, settings, onUpdate, onUpdateSettings, officeSib
     </Section>
   );
 }
-function Pill({ fg, bg, children }) { return <span style={{ fontSize: 11.5, fontWeight: 600, color: fg, background: bg, padding: "3px 9px", borderRadius: 20, display: "inline-block" }}>{children}</span>; }
-function MiniPill({ fg, bg, children }) { return <span style={{ fontSize: 10, fontWeight: 700, color: fg, background: bg, padding: "1px 7px", borderRadius: 10 }}>{children}</span>; }
+function Pill({ fg, bg, children }) { return <span style={{ fontSize: 11.5, fontWeight: 600, color: fg, background: bg, padding: "3px 9px", borderRadius: rad(20), display: "inline-block" }}>{children}</span>; }
+function MiniPill({ fg, bg, children }) { return <span style={{ fontSize: 10, fontWeight: 700, color: fg, background: bg, padding: "1px 7px", borderRadius: rad(10) }}>{children}</span>; }
 // Raised "real tab" look, shared by the main page and the client card: the
 // active tab lifts up and fuses with the content background (C.paper);
 // inactive tabs sit lower and darker on a recessed base.
@@ -4309,16 +4866,16 @@ function CopyNameBtn({ text, light }) {
     </button>
   );
 }
-function MiniBtn({ solid, small, icon, onClick, children }) { return <button onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: small ? 10.5 : 12, fontWeight: 600, padding: small ? "3px 8px" : "6px 11px", borderRadius: small ? 6 : 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{icon && <MenuIcon name={icon} size={small ? 11 : 13} color={solid ? "#fff" : C.action} />}{children}</button>; }
-function SolidBtn({ onClick, disabled, children }) { return <button onClick={onClick} disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: 8, cursor: disabled ? "default" : "pointer", border: "none", background: disabled ? C.grey : C.action, color: "#fff" }}>{children}</button>; }
-function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: 8, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
-function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: 8, border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
+function MiniBtn({ solid, small, icon, onClick, children }) { const look = useLook(); return <button onClick={onClick} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: small ? 10.5 : 12, fontWeight: 600, padding: small ? (look.studio ? "5px 11px" : "3px 8px") : (look.studio ? "7px 14px" : "6px 11px"), borderRadius: look.studio ? T.rBtn : small ? 6 : 7, cursor: "pointer", border: solid ? "none" : `1px solid ${C.line}`, background: solid ? C.action : C.panel, color: solid ? "#fff" : C.ink }}>{icon && <MenuIcon name={icon} size={small ? 11 : 13} color={solid ? "#fff" : C.action} />}{children}</button>; }
+function SolidBtn({ onClick, disabled, children }) { return <button onClick={onClick} disabled={disabled} style={{ fontSize: 13, fontWeight: 600, padding: "9px 16px", borderRadius: T.rBtn, cursor: disabled ? "default" : "pointer", border: "none", background: disabled ? C.grey : C.action, color: "#fff" }}>{children}</button>; }
+function GhostBtn({ onClick, children }) { return <button onClick={onClick} style={{ fontSize: 13, fontWeight: 600, padding: "9px 14px", borderRadius: T.rBtn, cursor: "pointer", border: `1px solid ${C.line}`, background: C.panel, color: C.ink }}>{children}</button>; }
+function MiniSelect({ value, onChange, options }) { return <select value={value} onChange={(e) => onChange(e.target.value)} style={{ fontSize: 13, padding: "8px 11px", borderRadius: rad(8), border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer", maxWidth: 220 }}>{options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>; }
 // A select whose box hugs its content instead of stretching full-width, so
 // the dropdown arrow sits right next to the text instead of way out at the
 // edge of a wide box.
 function CompactSelect({ value, onChange, children }) {
   return (
-    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: 8, padding: "9px 11px", background: C.panel }}>
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, border: `1px solid ${C.line}`, borderRadius: rad(8), padding: "9px 11px", background: C.panel }}>
       <select value={value} onChange={onChange} style={{ border: "none", outline: "none", background: "transparent", appearance: "none", WebkitAppearance: "none", MozAppearance: "none", fontSize: 14, color: C.ink, cursor: "pointer" }}>
         {children}
       </select>
@@ -4329,8 +4886,8 @@ function CompactSelect({ value, onChange, children }) {
 function ToggleSwitch({ checked, onChange, label }) {
   return (
     <label className="flex items-center" style={{ gap: 10, cursor: "pointer", userSelect: "none" }}>
-      <span onClick={() => onChange(!checked)} style={{ position: "relative", width: 36, height: 20, borderRadius: 20, background: checked ? C.action : C.line, flexShrink: 0, transition: "background 0.15s" }}>
-        <span style={{ position: "absolute", top: 2, left: checked ? 18 : 2, width: 16, height: 16, borderRadius: 16, background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.25)", transition: "left 0.15s" }} />
+      <span onClick={() => onChange(!checked)} style={{ position: "relative", width: 36, height: 20, borderRadius: rad(20), background: checked ? C.action : C.line, flexShrink: 0, transition: "background 0.15s" }}>
+        <span style={{ position: "absolute", top: 2, left: checked ? 18 : 2, width: 16, height: 16, borderRadius: rad(16), background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.25)", transition: "left 0.15s" }} />
       </span>
       {label && <span style={{ fontSize: 13, color: C.ink }}>{label}</span>}
     </label>
@@ -4347,7 +4904,7 @@ function CredField({ label, value, onChange, placeholder }) {
       <div style={{ display: "flex", alignItems: "stretch", gap: 6 }}>
         <input style={{ ...inputStyle, fontFamily: MONO, fontSize: 13 }} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} />
         <button type="button" onClick={copy} title={`Copy ${label.toLowerCase()}`} aria-label={`Copy ${label.toLowerCase()}`} disabled={!value}
-          style={{ flexShrink: 0, width: 36, borderRadius: 8, border: `1px solid ${C.line}`, background: copied ? C.greenBg : C.panel, color: copied ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+          style={{ flexShrink: 0, width: 36, borderRadius: rad(8), border: `1px solid ${C.line}`, background: copied ? C.greenBg : C.panel, color: copied ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
           {copied
             ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
             : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
@@ -4375,9 +4932,9 @@ function MaritzUsers({ client }) {
       <div className="flex items-center justify-between" style={{ gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11.5, fontWeight: 600, color: C.sub }}>Portal users · collected {fmtDate(list.collectedAt)} · {k ? `${shown.length}/${list.users.length}` : list.users.length}</span>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search users"
-          style={{ fontSize: 12, padding: "5px 9px", borderRadius: 7, border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 150 }} />
+          style={{ fontSize: 12, padding: "5px 9px", borderRadius: rad(7), border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 150 }} />
       </div>
-      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 8 }}>
+      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: rad(8) }}>
         <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 12 }}>
           <thead><tr style={{ background: C.lineSoft }}>{["Name", "Username", "Password"].map((h) => <th key={h} style={{ textAlign: "left", padding: "5px 8px", color: C.sub, fontWeight: 600 }}>{h}</th>)}</tr></thead>
           <tbody>
@@ -4389,13 +4946,13 @@ function MaritzUsers({ client }) {
     </div>
   );
 }
-const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8, border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
+const inputStyle = { width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: rad(8), border: `1px solid ${C.line}`, outline: "none", boxSizing: "border-box", color: C.ink, background: C.panel };
 // Uniform footer button on the client card; pass an accent for destructive actions.
-const footBtn = (accent) => ({ fontSize: 12.5, fontWeight: 600, color: accent || C.ink, background: C.panel, border: `1px solid ${accent ? accent + "66" : C.line}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" });
+const footBtn = (accent) => ({ fontSize: 12.5, fontWeight: 600, color: accent || C.ink, background: C.panel, border: `1px solid ${accent ? accent + "66" : C.line}`, borderRadius: rad(8), padding: "8px 14px", cursor: "pointer" });
 
 function EmptyState({ onImport, onSample }) {
   return (
-    <div style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}` }}>
+    <div style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}` }}>
       <div style={{ padding: "56px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No clients yet</div>
         <div style={{ fontSize: 13, color: C.sub, maxWidth: 380, margin: "0 auto 18px" }}>Import your client CSV, or load sample data to explore arrears tracking, escalating reminders, the workflow board and contact recovery.</div>
@@ -4424,13 +4981,13 @@ function ArchivedPanel({ archived, onOpen, onUpdateWithLog }) {
       <p style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>
         {list.length} archived client{list.length === 1 ? "" : "s"}. Restoring puts them straight back in the lists — nothing was lost.
       </p>
-      <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ border: `1px solid ${C.line}`, borderRadius: rad(10), overflow: "hidden" }}>
         {list.map((c, i) => (
           <div key={c.id} className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i ? `1px solid ${C.lineSoft}` : "none" }}>
             <div role="button" tabIndex={0} onClick={() => onOpen(c.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(c.id); }} style={{ flex: 1, minWidth: 0, cursor: "pointer" }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
                 {c.company || c.name || "(no name)"}
-                {c.formerCustomer && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 5, padding: "1px 5px" }}>no longer a customer</span>}
+                {c.formerCustomer && <span style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: rad(5), padding: "1px 5px" }}>no longer a customer</span>}
               </div>
               <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {[c.name, c.email, c.chargeoverId && `CO#${c.chargeoverId}`].filter(Boolean).join(" · ")}
@@ -4487,13 +5044,13 @@ function DeletedPanel({ isAdmin }) {
           <p style={{ fontSize: 12.5, color: C.sub, marginBottom: 12 }}>
             {rows.length} deleted client{rows.length === 1 ? "" : "s"}. Restoring puts the whole record back — notes, portal logins, history and all.
           </p>
-          <div style={{ border: `1px solid ${C.line}`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ border: `1px solid ${C.line}`, borderRadius: rad(10), overflow: "hidden" }}>
             {rows.map((c, i) => (
               <div key={c.id} className="flex items-center" style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderTop: i ? `1px solid ${C.lineSoft}` : "none" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: C.ink }}>
                     {c.company || c.name || "(no name)"}
-                    {c.syncExcluded && <span title="On the ChargeOver never-resurrect list — restoring will not resume syncing" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: 5, padding: "1px 5px" }}>sync-excluded</span>}
+                    {c.syncExcluded && <span title="On the ChargeOver never-resurrect list — restoring will not resume syncing" style={{ marginLeft: 8, fontSize: 10.5, fontWeight: 600, color: C.sub, border: `1px solid ${C.line}`, borderRadius: rad(5), padding: "1px 5px" }}>sync-excluded</span>}
                   </div>
                   <div style={{ fontSize: 11.5, color: C.sub, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {[c.email, c.chargeoverId && `CO#${c.chargeoverId}`, `deleted ${new Date(c.deletedAt).toLocaleDateString()}${c.deletedBy ? ` by ${c.deletedBy}` : ""}`].filter(Boolean).join(" · ")}
@@ -4549,9 +5106,9 @@ function ImportPanel({ onImport, onSample }) {
   return (
     <div>
       <p style={{ fontSize: 13, color: C.sub, marginBottom: 10 }}>Paste CSV (or a JSON backup) or choose a file. Recognised columns:</p>
-      <code style={{ display: "block", fontFamily: MONO, fontSize: 11, background: C.lineSoft, padding: "10px 12px", borderRadius: 8, marginBottom: 14, overflowX: "auto" }}>chargeoverId, name, company, email, phone, segment, billingStatus, stage, tags, amount, currency, cadence, billingDay, lastPaid, followUp, notes, emailStatus</code>
+      <code style={{ display: "block", fontFamily: MONO, fontSize: 11, background: C.lineSoft, padding: "10px 12px", borderRadius: rad(8), marginBottom: 14, overflowX: "auto" }}>chargeoverId, name, company, email, phone, segment, billingStatus, stage, tags, amount, currency, cadence, billingDay, lastPaid, followUp, notes, emailStatus</code>
       <input type="file" accept=".csv,.json,text/csv,application/json" onChange={(e) => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = () => handle(String(r.result)); r.readAsText(f); }} style={{ fontSize: 13, marginBottom: 14, color: C.sub }} />
-      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="name,email,segment,billingStatus,amount,billingDay" style={{ width: "100%", fontFamily: MONO, fontSize: 12, padding: 12, borderRadius: 8, border: `1px solid ${C.line}`, resize: "vertical", outline: "none", boxSizing: "border-box" }} />
+      <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} placeholder="name,email,segment,billingStatus,amount,billingDay" style={{ width: "100%", fontFamily: MONO, fontSize: 12, padding: 12, borderRadius: rad(8), border: `1px solid ${C.line}`, resize: "vertical", outline: "none", boxSizing: "border-box" }} />
       {error && <p style={{ color: C.red, fontSize: 12, marginTop: 8 }}>{error}</p>}
       <div className="flex items-center justify-between" style={{ marginTop: 16 }}>
         <button onClick={onSample} style={{ fontSize: 13, color: C.action, background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>Load sample instead</button>
@@ -4698,7 +5255,7 @@ function EmailTemplatesPanel({ settings, onSave, user }) {
           <div className="flex" style={{ flexWrap: "wrap", gap: 5 }}>
             {TEMPLATE_TOKENS.map((t) => (
               <button key={t} onClick={() => insertToken(t)} title={TOKEN_HINTS[t] || t}
-                style={{ fontSize: 11.5, fontFamily: MONO, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                style={{ fontSize: 11.5, fontFamily: MONO, fontWeight: 600, color: C.action, background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(6), padding: "3px 8px", cursor: "pointer" }}>
                 {`{{${t}}}`}
               </button>
             ))}
@@ -4735,7 +5292,7 @@ function EmailTemplatesPanel({ settings, onSave, user }) {
           const label = custom[key]?.label || (builtin ? COMMS[key].label : key);
           const deletable = !builtin || !!custom[key]; // custom, or an edited built-in (resets)
           return (
-            <div key={key} className="flex items-center justify-between" style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 34px 10px 14px", gap: 8 }}>
+            <div key={key} className="flex items-center justify-between" style={{ position: "relative", background: C.paper, border: `1px solid ${C.line}`, borderRadius: rad(10), padding: "10px 34px 10px 14px", gap: 8 }}>
               {deletable && (
                 <button onClick={() => (builtin ? resetToDefault(key) : remove(key))} title={builtin ? "Reset to default wording" : "Delete template"} aria-label={builtin ? "Reset template" : "Delete template"}
                   style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: C.faint, cursor: "pointer", fontSize: 14, lineHeight: 1, padding: 2 }}
@@ -4762,7 +5319,7 @@ function CopyIcon({ value, title }) {
   const copy = () => { if (!value) return; navigator.clipboard?.writeText(value).then(() => { setOk(true); setTimeout(() => setOk(false), 1200); }); };
   return (
     <button type="button" onClick={copy} title={title || "Copy"} aria-label={title || "Copy"} disabled={!value}
-      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: ok ? C.greenBg : C.panel, color: ok ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: rad(6), border: `1px solid ${C.line}`, background: ok ? C.greenBg : C.panel, color: ok ? C.green : value ? C.sub : C.faint, cursor: value ? "pointer" : "default", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
       {ok ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
           : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>}
     </button>
@@ -4834,7 +5391,7 @@ function ViperCustomers({ clients = [], onSync }) {
     <div>
       <div className="flex items-center justify-between" style={{ gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search customers"
-          style={{ fontSize: 13, padding: "7px 11px", borderRadius: 8, border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 200 }} />
+          style={{ fontSize: 13, padding: "7px 11px", borderRadius: rad(8), border: `1px solid ${k ? C.action : C.line}`, background: C.panel, outline: "none", minWidth: 200 }} />
         <div className="flex items-center" style={{ gap: 8 }}>
           {note && <span style={{ fontSize: 12, fontWeight: 600, color: C.green }}>✓ {note}</span>}
           <span style={{ fontSize: 12, color: C.faint }}>{shown.length} of {rows.length}</span>
@@ -4842,7 +5399,7 @@ function ViperCustomers({ clients = [], onSync }) {
         </div>
       </div>
 
-      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 10 }}>
+      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: rad(10) }}>
         <div style={{ minWidth: 900 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.9fr 1.9fr 1fr 1.2fr 34px", gap: 8, padding: "8px 12px", background: C.lineSoft, fontSize: 11, fontWeight: 700, color: C.sub, letterSpacing: "0.02em", textTransform: "uppercase", position: "sticky", top: 0 }}>
             <span>Client name</span><span>Portal URL</span><span>Admin URL</span><span>Admin user</span><span>Admin password</span><span />
@@ -4856,10 +5413,10 @@ function ViperCustomers({ clients = [], onSync }) {
 }
 
 function ViperRow({ c, onChange, onSave, onRemove }) {
-  const cell = { fontSize: 12.5, padding: "6px 8px", borderRadius: 7, border: `1px solid ${C.line}`, background: C.panel, outline: "none", width: "100%", boxSizing: "border-box", color: C.ink };
+  const cell = { fontSize: 12.5, padding: "6px 8px", borderRadius: rad(7), border: `1px solid ${C.line}`, background: C.panel, outline: "none", width: "100%", boxSizing: "border-box", color: C.ink };
   const link = (url) => url && (
     <a href={url} target="_blank" rel="noopener noreferrer" title="Open in new tab"
-      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.action, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      style={{ flexShrink: 0, width: 26, height: 26, borderRadius: rad(6), border: `1px solid ${C.line}`, background: C.panel, color: C.action, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><path d="M15 3h6v6M10 14L21 3" /></svg>
     </a>
   );
@@ -4875,9 +5432,386 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
       {F("adminUser", true)}
       <div className="flex items-center" style={{ gap: 5 }}>{F("adminPw", true)}<CopyIcon value={c.adminPw} title="Copy password" /></div>
       <button type="button" onClick={() => onRemove(c.id)} title="Remove" aria-label="Remove customer"
-        style={{ width: 26, height: 26, borderRadius: 6, border: `1px solid ${C.line}`, background: C.panel, color: C.red, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        style={{ width: 26, height: 26, borderRadius: rad(6), border: `1px solid ${C.line}`, background: C.panel, color: C.red, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>
       </button>
+    </div>
+  );
+}
+
+/* ============================== Looks ============================== */
+// Which look is active. `studio` covers both Studio looks (same layout,
+// light or dark tokens); components branch on it only where the Studio
+// layout is structurally different — colours/fonts/radii come from tokens.
+const LookCtx = React.createContext({ id: "classic", studio: false, dark: false });
+function useLook() { return React.useContext(LookCtx); }
+
+// Look picker — a list of every look with a colour swatch. `variant`:
+// "menu" (Classic side rail item) or "circle" (Studio round icon button).
+function LookSwitcher({ look, onChange, variant = "circle" }) {
+  const [menu, setMenu] = useState(null);
+  const info = THEMES.find((t) => t.id === look) || THEMES[0];
+  const open = (e) => {
+    e.stopPropagation();
+    if (menu) { setMenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const W = 272;
+    setMenu(variant === "menu"
+      ? { top: Math.min(r.top, window.innerHeight - 330), left: r.right + 8 }
+      : { top: r.bottom + 10, left: Math.max(8, Math.min(r.right - W, window.innerWidth - W - 8)) });
+  };
+  return (
+    <>
+      {variant === "menu"
+        ? <MenuItem icon="look" onClick={open}>{`Look\u00a0· ${info.label}`}</MenuItem>
+        : <IconCircle icon="look" title={`Look: ${info.label} — change`} onClick={open} active={!!menu} />}
+      {menu && createPortal(
+        <>
+          <div onMouseDown={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 130 }} />
+          <div role="menu" style={{ position: "fixed", top: menu.top, left: menu.left, width: 272, zIndex: 131, background: C.panel, color: C.ink, border: `1px solid ${C.line}`, borderRadius: rad(14), boxShadow: T.shPop, padding: 8, fontFamily: SANS }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: C.faint, padding: "6px 8px 8px" }}>Look</div>
+            {THEMES.map((t) => {
+              const on = t.id === look;
+              return (
+                <button key={t.id} role="menuitemradio" aria-checked={on} onClick={() => { onChange(t.id); setMenu(null); }}
+                  onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = C.lineSoft; }} onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = "transparent"; }}
+                  style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", textAlign: "left", padding: "9px 8px", border: "none", borderRadius: rad(10), cursor: "pointer", background: on ? C.accentSoft : "transparent", color: C.ink }}>
+                  <span aria-hidden style={{ display: "inline-flex", flexShrink: 0, borderRadius: 999, overflow: "hidden", boxShadow: `0 0 0 1px ${C.line}` }}>
+                    {t.swatch.map((s, i) => <span key={i} style={{ width: 12, height: 26, background: s }} />)}
+                  </span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5, fontWeight: 600 }}>{t.label}{t.dark && <MenuIcon name="moon" size={12} color={C.faint} />}</span>
+                    <span style={{ display: "block", fontSize: 11.5, color: C.faint, lineHeight: 1.35 }}>{t.desc}</span>
+                  </span>
+                  {on && <span style={{ color: C.action, fontWeight: 700 }}>✓</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// Studio avatar button: initials circle that opens account + sign-out.
+function UserMenu({ user, onAccount, onLogout }) {
+  const [menu, setMenu] = useState(null);
+  const open = (e) => {
+    if (menu) { setMenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    setMenu({ top: r.bottom + 10, right: Math.max(8, window.innerWidth - r.right) });
+  };
+  const item = { display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left", padding: "10px 10px", border: "none", borderRadius: rad(10), background: "transparent", cursor: "pointer", fontSize: 13.5, fontWeight: 500, color: C.ink };
+  const hov = { onMouseEnter: (e) => (e.currentTarget.style.background = C.lineSoft), onMouseLeave: (e) => (e.currentTarget.style.background = "transparent") };
+  return (
+    <>
+      <button type="button" onClick={open} title={user.name || user.email} aria-label="Account menu"
+        style={{ width: 44, height: 44, borderRadius: "50%", border: `2px solid ${C.panel}`, cursor: "pointer", flexShrink: 0, padding: 0,
+          background: C.hero, color: "#fff", fontSize: 14, fontWeight: 700, boxShadow: `0 0 0 1px ${C.line}, ${T.shCard}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        {initialsOf(user.name || user.email)}
+      </button>
+      {menu && createPortal(
+        <>
+          <div onMouseDown={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 130 }} />
+          <div role="menu" style={{ position: "fixed", top: menu.top, right: menu.right, width: 240, zIndex: 131, background: C.panel, border: `1px solid ${C.line}`, borderRadius: rad(14), boxShadow: T.shPop, padding: 8, fontFamily: SANS }}>
+            <div style={{ padding: "8px 10px 10px", borderBottom: `1px solid ${C.lineSoft}`, marginBottom: 6 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{user.name || "Signed in"}</div>
+              <div style={{ fontSize: 12, color: C.faint, overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
+            </div>
+            <button role="menuitem" style={item} {...hov} onClick={() => { setMenu(null); onAccount(); }}><MenuIcon name="users" size={17} color={C.action} />{user.role === "admin" ? "Users" : "My account"}</button>
+            <button role="menuitem" style={item} {...hov} onClick={onLogout}><MenuIcon name="signout" size={17} color={C.action} />Sign out</button>
+          </div>
+        </>,
+        document.body
+      )}
+    </>
+  );
+}
+
+// Round white icon button (Studio top bar + page header). `dot` shows an
+// alert dot; `badge` a small count.
+function IconCircle({ icon, title, onClick, dot, badge, active, size = 40, dark }) {
+  return (
+    <button type="button" onClick={onClick} title={title} aria-label={title}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = dark ? "rgba(255,255,255,0.14)" : C.lineSoft; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = dark ? "rgba(255,255,255,0.06)" : C.panel; }}
+      style={{ position: "relative", width: size, height: size, flexShrink: 0, borderRadius: "50%", cursor: "pointer",
+        display: "inline-flex", alignItems: "center", justifyContent: "center",
+        border: `1px solid ${dark ? "rgba(255,255,255,0.14)" : C.line}`, background: active ? C.accentSoft : dark ? "rgba(255,255,255,0.06)" : C.panel,
+        boxShadow: dark ? "none" : T.shCard, transition: "background 0.12s" }}>
+      <MenuIcon name={icon} size={Math.round(size * 0.43)} color={dark ? "rgba(255,255,255,0.9)" : C.ink} />
+      {dot && <span aria-hidden style={{ position: "absolute", top: size * 0.2, right: size * 0.22, width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 0 2px ${C.panel}` }} />}
+      {badge > 0 && <span aria-hidden style={{ position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: C.red, color: "#fff", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 0 2px ${C.paper}` }}>{badge > 99 ? "99+" : badge}</span>}
+    </button>
+  );
+}
+
+// Primary Studio call-to-action: solid Blue 800 pill with a leading plus.
+function PillCTA({ onClick, icon = "add", children, title }) {
+  return (
+    <button type="button" onClick={onClick} title={title}
+      style={{ display: "inline-flex", alignItems: "center", gap: 9, padding: "13px 22px", borderRadius: 999, border: "none", cursor: "pointer",
+        background: C.action, color: "#fff", fontSize: 14, fontWeight: 600, whiteSpace: "nowrap",
+        boxShadow: `0 12px 26px -12px ${C.action}` }}>
+      {icon && <MenuIcon name={icon} size={17} color="#fff" />}{children}
+    </button>
+  );
+}
+
+// The tab tray cut into a dark surface. `edge="top"` hangs from the top edge
+// (panels); `edge="bottom"` rises from the bottom edge (drawer header). The
+// tray is painted in the colour of the surface it opens onto (`bg`), with two
+// concave fillets so it reads as a notch cut out of the dark surface rather
+// than a pill laid on top.
+function NotchTray({ bg, edge = "top", children, style }) {
+  const F = 22; // fillet radius, px
+  const top = edge === "top";
+  const fillet = (side) => ({
+    position: "absolute", [top ? "top" : "bottom"]: 0, [side]: -F, width: F, height: F, pointerEvents: "none",
+    background: `radial-gradient(circle at ${side === "left" ? "0" : "100%"} ${top ? "100%" : "0"}, transparent ${F - 0.6}px, ${bg} ${F}px)`,
+  });
+  return (
+    <div className="st-tray" style={{ position: "relative", background: bg, padding: top ? "8px 8px 9px" : "9px 8px 8px",
+      borderRadius: top ? `0 0 ${rad(16)} ${rad(16)}` : `${rad(16)} ${rad(16)} 0 0`, ...style }}>
+      <span aria-hidden style={fillet("left")} />
+      <span aria-hidden style={fillet("right")} />
+      {children}
+    </div>
+  );
+}
+// Studio dark panel with the tab tray cut into its top edge.
+function NotchPanel({ title, sub, tabs, active, onTab, right, children, trayBg, style, headStyle }) {
+  return (
+    <section className="st-notch" style={{ position: "relative", background: C.boardGradient, color: C.ink, borderRadius: rad(18), padding: "0 18px 18px", boxShadow: T.shCard, ...style }}>
+      <div className="st-notch-head" style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", alignItems: "start", gap: 14, marginBottom: 14, ...headStyle }}>
+        <div style={{ minWidth: 0, paddingTop: 20 }}>
+          {title && <div style={{ fontSize: 15.5, fontWeight: 600, letterSpacing: "0.005em", color: "#fff" }}>{title}</div>}
+          {sub && <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 3 }}>{sub}</div>}
+        </div>
+        {tabs ? <NotchTray bg={trayBg || C.paper} style={{ justifySelf: "center" }}><NotchTabs tabs={tabs} active={active} onTab={onTab} /></NotchTray> : <span />}
+        <div style={{ justifySelf: "end", display: "flex", alignItems: "center", gap: 8, paddingTop: 14, minWidth: 0, flexWrap: "wrap", justifyContent: "flex-end" }}>{right}</div>
+      </div>
+      {children}
+    </section>
+  );
+}
+function NotchTabs({ tabs, active, onTab }) {
+  return (
+    <div role="tablist" style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      {tabs.map((t) => {
+        const on = t.key === active;
+        return (
+          <button key={t.key} role="tab" aria-selected={on} onClick={() => onTab(t.key)}
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "9px 16px", borderRadius: 999, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+              background: on ? C.action : "transparent", color: on ? "#fff" : C.ink, fontSize: 13, fontWeight: 600,
+              boxShadow: on ? `0 8px 18px -10px ${C.action}` : "none", transition: "background 0.12s" }}>
+            {t.label}
+            {t.count != null && (
+              <span style={{ minWidth: 20, height: 20, padding: "0 6px", borderRadius: 999, fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center",
+                background: on ? "#fff" : "transparent", color: on ? C.action : C.faint }}>{t.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// A row in a Studio dark list (Today worklist, Emails queue): avatar, name +
+// sub line, a status pill and a right-hand figure. The selected row lifts
+// into Blue 800 with a white status pill, as in the reference.
+function DarkRow({ title, sub, status, figure, figureSub, selected, onClick, initials, avatarBg }) {
+  return (
+    <button type="button" onClick={onClick}
+      onMouseEnter={(e) => { if (!selected) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
+      onMouseLeave={(e) => { if (!selected) e.currentTarget.style.background = "transparent"; }}
+      style={{ display: "grid", gridTemplateColumns: "40px minmax(0,1fr) auto auto", alignItems: "center", gap: 12, width: "100%", textAlign: "left",
+        padding: "10px 12px", borderRadius: rad(12), border: "none", cursor: "pointer", color: "#fff",
+        background: selected ? C.action : "transparent", boxShadow: selected ? "0 14px 30px -16px rgba(0,0,0,0.6)" : "none", transition: "background 0.12s" }}>
+      <span aria-hidden style={{ width: 40, height: 40, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700,
+        background: selected ? "rgba(255,255,255,0.18)" : avatarBg || "rgba(152,182,224,0.16)", color: selected ? "#fff" : "#C9DAF1" }}>{initials}</span>
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+        {sub && <span style={{ display: "block", fontSize: 11.5, color: selected ? "rgba(255,255,255,0.78)" : "rgba(255,255,255,0.55)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sub}</span>}
+      </span>
+      {status ? (
+        <span style={{ fontSize: 11.5, fontWeight: 600, padding: "5px 11px", borderRadius: 999, whiteSpace: "nowrap",
+          background: selected ? "#fff" : "rgba(255,255,255,0.07)", color: selected ? C.action : "rgba(255,255,255,0.72)" }}>{status}</span>
+      ) : <span />}
+      <span style={{ textAlign: "right", minWidth: 64 }}>
+        {figure && <span style={{ display: "block", fontFamily: DISPLAY, fontSize: 15, fontWeight: 500, whiteSpace: "nowrap" }}>{figure}</span>}
+        {figureSub && <span style={{ display: "block", fontSize: 10.5, color: selected ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.5)", whiteSpace: "nowrap" }}>{figureSub}</span>}
+      </span>
+    </button>
+  );
+}
+
+// Translucent value tile inside the Blue 800 hero panel.
+function HeroTile({ label, value, onClick, title }) {
+  const Tag = onClick ? "button" : "div";
+  return (
+    <Tag type={onClick ? "button" : undefined} onClick={onClick} title={title}
+      style={{ position: "relative", textAlign: "left", font: "inherit", color: "#fff", cursor: onClick ? "pointer" : "default", minWidth: 0,
+        background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.16)", borderRadius: rad(12), padding: "16px 16px 14px" }}>
+      {onClick && <span aria-hidden style={{ position: "absolute", top: 12, right: 12, opacity: 0.8 }}><MenuIcon name="arrowUpRight" size={15} color="#fff" /></span>}
+      <div style={{ fontFamily: DISPLAY, fontSize: 21, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", paddingRight: 18 }}>{value}</div>
+      <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 8 }}>{label}</div>
+    </Tag>
+  );
+}
+
+// Mini charts for the Studio KPI cards — bars (last value in Blue 800, the
+// rest in periwinkle) and a dotted line with a soft area fill.
+function MiniBars({ data, labels, h = 78 }) {
+  if (!data || !data.length) return null;
+  const max = Math.max(...data, 1);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 7, height: h + 16 }}>
+      {data.map((v, i) => (
+        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, minWidth: 0 }}>
+          <div style={{ width: "100%", maxWidth: 16, height: Math.max(6, (v / max) * h), borderRadius: 6,
+            background: i === data.length - 1 ? C.action : `linear-gradient(180deg, ${alpha(C.accent, 95)}, ${alpha(C.accent, 55)})` }} />
+          {labels && <span style={{ fontSize: 9, color: C.faint, whiteSpace: "nowrap" }}>{labels[i]}</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+function MiniLine({ data, h = 86 }) {
+  const id = React.useId();
+  if (!data || data.length < 2) return null;
+  const w = 220, pad = 6;
+  const min = Math.min(...data), max = Math.max(...data), span = max - min || 1;
+  const pts = data.map((v, i) => [pad + (i / (data.length - 1)) * (w - pad * 2), h - pad - ((v - min) / span) * (h - pad * 2 - 8)]);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ");
+  const area = `${line} L${pts[pts.length - 1][0].toFixed(1)},${h} L${pts[0][0].toFixed(1)},${h} Z`;
+  const step = Math.max(1, Math.round(data.length / 7));
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", width: "100%", height: h, overflow: "visible" }} aria-hidden>
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" style={{ stopColor: C.action, stopOpacity: 0.22 }} />
+          <stop offset="100%" style={{ stopColor: C.action, stopOpacity: 0 }} />
+        </linearGradient>
+      </defs>
+      <path d={area} style={{ fill: `url(#${id})` }} />
+      <path d={line} fill="none" style={{ stroke: C.action }} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      {pts.map((p, i) => (i % step === 0 || i === pts.length - 1) && (
+        <circle key={i} cx={p[0]} cy={p[1]} r="3.4" style={{ fill: C.panel, stroke: C.action }} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      ))}
+    </svg>
+  );
+}
+
+// Studio KPI row: three white cards with a chart each, and a dark card of
+// "needs chasing" mini tiles (the reference's payout card). Same numbers as
+// the Classic StatStrip — one computeKpis — and the same drill-downs.
+function StudioStats({ clients, settings, bounced, replyCount, onFocus, onGo }) {
+  const k = useMemo(() => computeKpis(clients, settings), [clients, settings]);
+  const owedStr = Object.entries(k.owedByCur).map(([cur, v]) => money(v, cur)).join(" + ") || money(0, settings.currency);
+  const [snaps, setSnaps] = useState(null);
+  useEffect(() => { fetch("/api/reports").then((r) => r.json()).then((d) => setSnaps(d.snapshots || [])).catch(() => setSnaps([])); }, []);
+  const recent = (snaps || []).slice(-7);
+  const dayLbl = (s) => { const dt = parseDate(s.date); return dt ? dt.toLocaleDateString("en-GB", { day: "numeric", month: "short" }).replace(" ", " ") : ""; };
+  const delta = (key) => {
+    const s = snaps || [];
+    if (s.length < 2 || !s[0][key]) return null;
+    return ((s[s.length - 1][key] - s[0][key]) / Math.abs(s[0][key])) * 100;
+  };
+  const Delta = ({ v, goodUp, fallback }) => v == null ? <span style={{ color: C.faint }}>{fallback}</span> : (
+    <span style={{ color: (v >= 0) === goodUp ? C.green : C.red, fontWeight: 600 }}>
+      {v >= 0 ? "↑" : "↓"} {Math.abs(v).toFixed(1)}% <span style={{ color: C.faint, fontWeight: 500 }}>over {(snaps || []).length} days</span>
+    </span>
+  );
+  const card = { position: "relative", textAlign: "left", font: "inherit", color: C.ink, cursor: "pointer", minWidth: 0, display: "flex", flexDirection: "column",
+    background: C.panel, border: `1px solid ${C.lineSoft}`, borderRadius: rad(14), padding: "20px 20px 16px", boxShadow: T.shCard };
+  const Head = ({ label, icon, tone }) => (
+    <div className="flex items-center justify-between" style={{ gap: 10, marginBottom: 12 }}>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink }}>{label}</span>
+      <span style={{ width: 30, height: 30, borderRadius: "50%", display: "inline-flex", alignItems: "center", justifyContent: "center", background: alpha(tone, 12), flexShrink: 0 }}>
+        <MenuIcon name={icon} size={16} color={tone} />
+      </span>
+    </div>
+  );
+  const Big = ({ children, small }) => <div style={{ fontFamily: DISPLAY, fontSize: small ? 24 : 32, fontWeight: 500, letterSpacing: "-0.01em", lineHeight: 1.05, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{children}</div>;
+  const synced = k.totalClients ? Math.round((k.synced / k.totalClients) * 100) : 0;
+  return (
+    <section className="st-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16, marginBottom: 22 }}>
+      <button type="button" style={card} onClick={() => onFocus("owed")} title={`Show the ${k.overdue} clients in arrears`}>
+        <Head label="Total owed" icon="alert" tone={C.red} />
+        <Big small={owedStr.length > 12}>{owedStr}</Big>
+        <div style={{ fontSize: 12, marginTop: 8 }}><Delta v={delta("totalOwed")} goodUp={false} fallback={`${k.overdue} clients in arrears`} /></div>
+        <div style={{ marginTop: "auto", paddingTop: 14 }}>
+          {recent.length > 1 ? <MiniBars data={recent.map((s) => s.totalOwed)} labels={recent.map(dayLbl)} h={58} /> : <div style={{ fontSize: 11.5, color: C.faint }}>{k.overdue} in arrears · {k.synced}/{k.totalClients} synced</div>}
+        </div>
+      </button>
+      <button type="button" style={card} onClick={() => onFocus("mrr")} title={`Show the ${k.mrrKnown} clients with a rate on file`}>
+        <Head label="Monthly recurring revenue" icon="trend" tone={C.action} />
+        <Big>{money(Math.round(k.mrr), settings.currency)}</Big>
+        <div style={{ fontSize: 12, marginTop: 8 }}><Delta v={delta("mrr")} goodUp fallback={`from ChargeOver · ${k.mrrKnown}/${k.totalClients} known`} /></div>
+        <div style={{ marginTop: "auto", paddingTop: 10 }}>
+          {(snaps || []).length > 1 ? <MiniLine data={snaps.map((s) => s.mrr)} h={70} /> : <div style={{ fontSize: 11.5, color: C.faint }}>Trend appears after two daily snapshots</div>}
+        </div>
+      </button>
+      <button type="button" style={card} onClick={() => onFocus("not-up-to-date")} title={`Show the ${k.notUpToDate} clients not up to date`}>
+        <Head label="Not up to date" icon="clock" tone={k.notUpToDate ? C.amber : C.green} />
+        <div className="flex items-end" style={{ gap: 8 }}><Big>{k.notUpToDate}</Big><span style={{ fontSize: 13, color: C.faint, paddingBottom: 3 }}>clients</span></div>
+        <div style={{ fontSize: 12, marginTop: 8, color: C.faint }}>per ChargeOver status</div>
+        <div style={{ marginTop: "auto", paddingTop: 16 }}>
+          <div className="flex justify-between" style={{ fontSize: 11, color: C.faint, marginBottom: 6 }}><span>ChargeOver synced</span><span style={{ fontWeight: 600, color: C.ink }}>{k.synced}/{k.totalClients}</span></div>
+          <div style={{ height: 8, borderRadius: 999, background: C.lineSoft, overflow: "hidden" }}>
+            <div style={{ width: `${synced}%`, height: "100%", borderRadius: 999, background: `linear-gradient(90deg, ${C.accent}, ${C.action})` }} />
+          </div>
+          <div className="flex justify-between" style={{ fontSize: 11, color: C.faint, marginTop: 10 }}><span>Follow-ups due</span><span style={{ fontWeight: 600, color: k.followUps ? C.amber : C.green }}>{k.followUps}</span></div>
+        </div>
+      </button>
+      {/* Dark card — the reference's payout card, reworked as the chase queue */}
+      <div style={{ ...card, cursor: "default", background: C.boardGradient, border: "1px solid rgba(255,255,255,0.06)", color: "#fff", padding: "20px 16px 16px" }}>
+        <div className="flex items-center justify-between" style={{ gap: 10, marginBottom: 4, padding: "0 4px" }}>
+          <span style={{ fontSize: 13.5, fontWeight: 600 }}>Needs chasing</span>
+          <button type="button" onClick={() => onGo("comms")} title="Open the email queue" style={{ width: 32, height: 32, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.06)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+            <MenuIcon name="arrowUpRight" size={15} color="#fff" />
+          </button>
+        </div>
+        <div style={{ fontFamily: DISPLAY, fontSize: 32, fontWeight: 500, padding: "0 4px", lineHeight: 1.1 }}>{k.followUps + bounced + replyCount}</div>
+        <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.6)", padding: "2px 4px 0" }}>open items across the team</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6, marginTop: "auto", paddingTop: 14, alignItems: "end" }}>
+          {[["Follow-ups", k.followUps, () => onFocus("follow-ups")], ["Replies", replyCount, () => onGo("replies"), true], ["Bounced", bounced, () => onFocus("bounced")]].map(([l, n, go, hi]) => (
+            <button key={l} type="button" onClick={go} title={`Open ${l.toLowerCase()}`}
+              style={{ textAlign: "left", cursor: "pointer", border: "none", borderRadius: rad(10), padding: hi ? "22px 10px 10px" : "12px 10px 10px", color: "#fff",
+                background: hi ? C.hero : "rgba(255,255,255,0.07)", boxShadow: hi ? "0 14px 26px -14px rgba(0,0,0,0.6)" : "none" }}>
+              <div style={{ fontFamily: DISPLAY, fontSize: 19, fontWeight: 500 }}>{n}</div>
+              <div style={{ fontSize: 10.5, color: hi ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.6)", marginTop: 4 }}>{l}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// Studio filter bar: "Active filters" count, the chips, and a pill search box.
+function StudioFilterBar({ chips, onClearAll, search, onSearch, placeholder = "Search", searchTitle, children }) {
+  return (
+    <div className="flex flex-wrap items-center" style={{ gap: 10, marginBottom: 16, padding: "10px 12px", background: C.panel, border: `1px solid ${C.lineSoft}`, borderRadius: 999, boxShadow: T.shCard }}>
+      {chips && (
+        <span className="flex items-center" style={{ gap: 8, fontSize: 13.5, fontWeight: 600, paddingLeft: 8, color: C.ink }}>
+          Active filters
+          <span style={{ minWidth: 22, height: 22, borderRadius: 999, background: C.brand, color: "#fff", fontSize: 11.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 6px" }}>{chips.length}</span>
+        </span>
+      )}
+      {(chips || []).map((f) => <Chip key={f.key} label={f.label} onClear={f.clear} />)}
+      {chips && chips.length > 1 && <button onClick={onClearAll} style={{ fontSize: 12.5, fontWeight: 600, color: C.action, background: "none", border: "none", cursor: "pointer" }}>Clear all</button>}
+      {children}
+      {onSearch && (
+        <label className="flex items-center" style={{ marginLeft: "auto", gap: 8, background: C.paper, border: `1px solid ${search?.trim() ? C.action : C.line}`, borderRadius: 999, padding: "0 14px", minWidth: 260, flex: "0 1 340px" }}>
+          <input value={search} onChange={(e) => onSearch(e.target.value)} placeholder={placeholder} title={searchTitle}
+            style={{ flex: 1, minWidth: 0, fontSize: 13, padding: "10px 0", border: "none", outline: "none", background: "transparent", color: C.ink, boxShadow: "none" }} />
+          <MenuIcon name="search" size={17} color={C.sub} />
+        </label>
+      )}
     </div>
   );
 }
@@ -4888,15 +5822,19 @@ function ViperRow({ c, onChange, onSave, onRemove }) {
 // match. Opt-in per caller so existing tall/wide modals (which size to their
 // content) don't change shape.
 function Modal({ title, onClose, children, wide, blueHeader, tall, fill }) {
+  const look = useLook();
+  const st = look.studio;
   return (
-    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: "rgba(34,48,76,0.45)", padding: 16, zIndex: 50 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, borderRadius: 16, width: "100%", maxWidth: wide ? 900 : 540,
-        ...(fill ? { height: "92vh" } : { maxHeight: tall ? "96vh" : "88vh" }), overflow: "auto", boxShadow: "0 24px 60px rgba(34,48,76,0.25)" }}>
-        <div className="flex items-center justify-between" style={{ padding: "18px 20px", borderBottom: `1px solid ${C.line}`, background: blueHeader ? C.boardGradient : undefined }}>
-          <h2 style={{ fontSize: 16, fontWeight: 700, fontFamily: DISPLAY, color: blueHeader ? "#fff" : undefined }}>{title}</h2>
-          <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: blueHeader ? "rgba(255,255,255,0.85)" : C.sub, cursor: "pointer", padding: 4, margin: -4 }}>✕</button>
+    <div onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }} className="flex items-center justify-center" style={{ position: "fixed", inset: 0, background: st ? "rgba(8,12,22,0.5)" : "rgba(34,48,76,0.45)", backdropFilter: st ? "blur(6px)" : undefined, WebkitBackdropFilter: st ? "blur(6px)" : undefined, padding: 16, zIndex: 50 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: C.panel, color: C.ink, borderRadius: rad(16), width: "100%", maxWidth: wide ? 900 : 540,
+        ...(fill ? { height: "92vh" } : { maxHeight: tall ? "96vh" : "88vh" }), overflow: "auto", boxShadow: st ? T.shPop : "0 24px 60px rgba(34,48,76,0.25)", border: st && look.dark ? `1px solid ${C.line}` : undefined }}>
+        <div className="flex items-center justify-between" style={{ padding: st ? "20px 24px" : "18px 20px", borderBottom: st && !blueHeader ? "none" : `1px solid ${C.line}`, background: blueHeader ? C.boardGradient : undefined }}>
+          <h2 style={{ fontSize: st ? 20 : 16, fontWeight: st ? 500 : 700, fontFamily: DISPLAY, color: blueHeader ? "#fff" : undefined }}>{title}</h2>
+          {st
+            ? <button onClick={onClose} aria-label="Close" style={{ width: 36, height: 36, borderRadius: "50%", border: `1px solid ${blueHeader ? "rgba(255,255,255,0.2)" : C.line}`, background: blueHeader ? "rgba(255,255,255,0.08)" : C.panel, color: blueHeader ? "#fff" : C.sub, cursor: "pointer", fontSize: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
+            : <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 18, color: blueHeader ? "rgba(255,255,255,0.85)" : C.sub, cursor: "pointer", padding: 4, margin: -4 }}>✕</button>}
         </div>
-        <div style={{ padding: 20 }}>{children}</div>
+        <div style={{ padding: st ? (blueHeader ? 24 : "4px 24px 24px") : 20 }}>{children}</div>
       </div>
     </div>
   );

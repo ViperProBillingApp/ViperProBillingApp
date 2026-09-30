@@ -1,14 +1,14 @@
 "use client";
 import { useState } from "react";
-import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
+import { C, T, SANS, DISPLAY, MONO, Wordmark, rad } from "../lib/brand.js";
 
 const inputStyle = {
-  width: "100%", fontSize: 15, padding: "11px 13px", borderRadius: 9,
+  width: "100%", fontSize: 15, padding: "11px 13px", borderRadius: rad(9),
   border: `1px solid ${C.line}`, outline: "none", background: C.panel, color: C.ink,
 };
-const cardStyle = { background: C.panel, borderRadius: 16, border: `1px solid ${C.line}`, padding: 26, boxShadow: "0 10px 30px rgba(34,48,76,0.07)" };
+const cardStyle = { background: C.panel, borderRadius: rad(16), border: `1px solid ${C.line}`, padding: 26, boxShadow: "0 10px 30px rgba(34,48,76,0.07)" };
 const primaryBtn = (busy) => ({
-  width: "100%", fontSize: 15, fontWeight: 600, padding: "12px 16px", borderRadius: 9,
+  width: "100%", fontSize: 15, fontWeight: 600, padding: "12px 16px", borderRadius: rad(9),
   border: "none", background: C.brand, color: C.brandInk, cursor: busy ? "default" : "pointer",
   opacity: busy ? 0.7 : 1, fontFamily: DISPLAY, letterSpacing: "0.02em",
 });

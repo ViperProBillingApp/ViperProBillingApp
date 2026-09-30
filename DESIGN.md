@@ -2,7 +2,25 @@
 
 Visual system for the ViperPro Client CRM. Source of truth for tokens: `lib/brand.js`. Derived from the ViperPro Brand System (Edition 01 · 2026): "grey ink, periwinkle accent."
 
-## Color
+## Looks (themes)
+
+Staff can switch the whole app between looks from the **Look** control (Classic: bottom of the left menu; Studio: palette button in the top bar). The choice is saved per browser (`localStorage` key `vp-look`) and applied before first paint by a boot script in `app/layout.jsx`, so login/reset pages follow it too. Studio is the default for anyone who hasn't picked a look (`DEFAULT_THEME`).
+
+| Look | Layout | Summary |
+| --- | --- | --- |
+| Classic | Side rail, glass metric tiles, raised tabs | The original look — unchanged, still one click away |
+| Studio | Top pill navigation, round icon buttons, KPI cards, notched dark panels | After the Finnova-style dashboard reference, in Viper colours: its violet → Blue 800 `#2F548C`, its near-black panels → deep navy `#141D31`, accent Blue 400 `#98B6E0` |
+| Studio Dark | Same as Studio | Dark mode: near-black navy with a soft blue glow; action steps up to Blue 600 `#5E86C2` |
+
+How it works: every token in `lib/brand.js` is a CSS variable (`C.ink` → `var(--vp-ink)`); each look's raw values live in `THEME_TOKENS`, emitted by `themeCss()`. Radii scale per look via `rad(px)` (Classic ×1, Studio ×1.6); use `alpha(color, pct)` for translucency (never append hex digits to a token). Components read `useLook()` only where the Studio layout is structurally different (shell, Today, Clients, Workflow, Emails, Replies, Recovery, drawer tabs, modals, metric tiles).
+
+**Adding a look:** add an entry to `THEMES` (id, label, `layout: "classic" | "studio"`, `dark`, swatch) and a full token set to `THEME_TOKENS`. Categorical colours (`catBlue`, `catTeal`, …) need lifted values on dark looks.
+
+**The notch:** Studio's signature element — a tab tray cut into a dark panel's edge (`NotchTray` / `NotchPanel` in `crm.jsx`). The tray is painted in the colour of the surface it opens onto, with two concave fillets. `edge="top"` for panels, `edge="bottom"` for the client drawer header.
+
+Blue scale (sampled from the 2026 brand PDF, p.5): 800 `#2F548C` · 700 `#3F6CAE` · 600 `#5E86C2` · 400 `#98B6E0` · 100 `#E9F0FA`. Slate: 950 `#232325` · 900 `#2E2E30` · 700 `#58585A` · 500 `#8A8A8F` · 200 `#E4E4E7`.
+
+## Color (Classic)
 
 Core: Slate 700 `#58585A` (body text) · Blue 400 `#98B6E0` (brand periwinkle — logo 'er', accents, key highlights).
 

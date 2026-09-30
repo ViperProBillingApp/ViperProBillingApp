@@ -56,11 +56,11 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: none;
-  border-color: #426190 !important;
-  box-shadow: 0 0 0 3px rgba(66, 97, 144, 0.15);
+  border-color: var(--vp-action) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vp-action) 18%, transparent);
 }
 button:focus-visible {
-  outline: 2px solid #426190;
+  outline: 2px solid var(--vp-action);
   outline-offset: 2px;
 }
 button:not(:disabled):active {
@@ -132,6 +132,32 @@ button:not(:disabled):active {
 @media (max-width: 767px) {
   .login-media { display: none; }
   .login-form-panel { flex: 1 1 100%; }
+}
+
+/* ---- Studio looks (Studio + Studio Dark) ------------------------------
+   Colours/fonts/radii come from the --vp-* tokens (lib/brand.js); these
+   rules only cover what inline styles can't: page backdrop, tabular
+   figures, and how the top bar / notch panels reflow on narrow screens. */
+html[data-theme="studio"] body,
+html[data-theme="midnight"] body { background: var(--vp-page-bg); font-variant-numeric: tabular-nums; }
+html[data-theme="midnight"] ::placeholder { color: #737b8c; }
+.st-nav, .st-tools, .st-tray { scrollbar-width: none; }
+.st-nav::-webkit-scrollbar, .st-tools::-webkit-scrollbar, .st-tray::-webkit-scrollbar { display: none; }
+html[data-theme="midnight"] ::selection { background: rgba(152, 182, 224, 0.35); }
+html[data-theme="midnight"] .login-media { background: #0b0f17; }
+@media (max-width: 1180px) {
+  .st-topbar .st-nav { order: 3; width: 100%; margin: 6px 0 0 !important; justify-content: center; }
+}
+@media (max-width: 900px) {
+  .st-split, .st-hero-top { grid-template-columns: 1fr !important; }
+  .st-notch-head { grid-template-columns: 1fr !important; }
+  .st-notch-head > .st-tray { justify-self: start !important; order: 3; border-radius: 16px !important; margin-bottom: 4px; max-width: 100%; overflow-x: auto; }
+  .st-notch-head > .st-tray > span[aria-hidden] { display: none; }
+}
+@media (max-width: 767px) {
+  .st-frame { border-radius: 0 !important; }
+  .st-tools { width: 100%; justify-content: flex-start !important; flex-wrap: nowrap !important; overflow-x: auto; padding-bottom: 4px; }
+  .st-topbar .st-nav { justify-content: flex-start; }
 }
 
 @theme inline { --font-heading: var(--font-sans); --font-sans: var(--font-sans); --color-sidebar-ring: var(--sidebar-ring); --color-sidebar-border: var(--sidebar-border); --color-sidebar-accent-foreground: var(--sidebar-accent-foreground); --color-sidebar-accent: var(--sidebar-accent); --color-sidebar-primary-foreground: var(--sidebar-primary-foreground); --color-sidebar-primary: var(--sidebar-primary); --color-sidebar-foreground: var(--sidebar-foreground); --color-sidebar: var(--sidebar); --color-chart-5: var(--chart-5); --color-chart-4: var(--chart-4); --color-chart-3: var(--chart-3); --color-chart-2: var(--chart-2); --color-chart-1: var(--chart-1); --color-ring: var(--ring); --color-input: var(--input); --color-border: var(--border); --color-destructive: var(--destructive); --color-accent-foreground: var(--accent-foreground); --color-accent: var(--accent); --color-muted-foreground: var(--muted-foreground); --color-muted: var(--muted); --color-secondary-foreground: var(--secondary-foreground); --color-secondary: var(--secondary); --color-primary-foreground: var(--primary-foreground); --color-primary: var(--primary); --color-popover-foreground: var(--popover-foreground); --color-popover: var(--popover); --color-card-foreground: var(--card-foreground); --color-card: var(--card); --color-foreground: var(--foreground); --color-background: var(--background); --radius-sm: calc(var(--radius) * 0.6); --radius-md: calc(var(--radius) * 0.8); --radius-lg: var(--radius); --radius-xl: calc(var(--radius) * 1.4); --radius-2xl: calc(var(--radius) * 1.8); --radius-3xl: calc(var(--radius) * 2.2); --radius-4xl: calc(var(--radius) * 2.6); }

@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { C, SANS, DISPLAY, MONO, Wordmark } from "../lib/brand.js";
+import { C, T, SANS, DISPLAY, MONO, Wordmark, rad } from "../lib/brand.js";
 
 const inputStyle = {
-  width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: 8,
+  width: "100%", fontSize: 14, padding: "9px 11px", borderRadius: rad(8),
   border: `1px solid ${C.line}`, outline: "none", background: C.panel, color: C.ink, boxSizing: "border-box",
 };
 const btn = (solid) => ({
-  fontSize: 13, fontWeight: 600, padding: "9px 15px", borderRadius: 8, cursor: "pointer",
+  fontSize: 13, fontWeight: 600, padding: "9px 15px", borderRadius: rad(8), cursor: "pointer",
   border: solid ? "none" : `1px solid ${C.line}`,
   background: solid ? C.brand : C.panel, color: solid ? C.brandInk : C.ink,
 });
@@ -21,7 +21,7 @@ function Field({ label, children }) {
 }
 function Card({ title, children }) {
   return (
-    <section style={{ background: C.panel, borderRadius: 14, border: `1px solid ${C.line}`, padding: 20, marginBottom: 16 }}>
+    <section style={{ background: C.panel, borderRadius: rad(14), border: `1px solid ${C.line}`, padding: 20, marginBottom: 16 }}>
       <h2 style={{ fontSize: 15, fontWeight: 700, marginBottom: 14, fontFamily: DISPLAY }}>{title}</h2>
       {children}
     </section>
@@ -59,7 +59,7 @@ function Headshot({ src, size = 56, onPick, onClear }) {
       <div style={{ width: size, height: size, borderRadius: "50%", overflow: "hidden", background: C.lineSoft, border: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
         {src
           ? <img src={src} alt="headshot" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-          : <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke={C.faint} strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>}
+          : <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" stroke="currentColor" style={{ color: C.faint }} strokeWidth="1.6"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>}
       </div>
       {onPick && (
         <div style={{ display: "flex", gap: 6 }}>
@@ -80,7 +80,7 @@ function SignatureUpload({ src, onPick, onClear }) {
     <div style={{ marginTop: 4 }}>
       <div style={{ fontSize: 12, fontWeight: 600, color: C.sub, marginBottom: 5 }}>Email signature image</div>
       {src
-        ? <img src={src} alt="email signature" style={{ maxWidth: 220, maxHeight: 80, display: "block", borderRadius: 6, border: `1px solid ${C.lineSoft}`, background: "#fff", padding: 4 }} />
+        ? <img src={src} alt="email signature" style={{ maxWidth: 220, maxHeight: 80, display: "block", borderRadius: rad(6), border: `1px solid ${C.lineSoft}`, background: "#fff", padding: 4 }} />
         : <div style={{ fontSize: 12, color: C.faint }}>None — outgoing emails go out without a signature image.</div>}
       <div style={{ display: "flex", gap: 10, marginTop: 5 }}>
         <label style={{ fontSize: 11.5, fontWeight: 600, color: C.brand, cursor: "pointer" }}>
@@ -123,16 +123,16 @@ export default function UsersAdmin({ me, embedded = false }) {
   const body = (
     <>
       {error && (
-        <div style={{ background: C.redBg, color: C.red, borderRadius: 10, padding: "10px 14px", fontSize: 13.5, marginBottom: 14 }}>
+        <div style={{ background: C.redBg, color: C.red, borderRadius: rad(10), padding: "10px 14px", fontSize: 13.5, marginBottom: 14 }}>
           {error}
         </div>
       )}
       {notice && (
-        <div style={{ background: C.greenBg, borderRadius: 10, padding: "12px 14px", fontSize: 13.5, marginBottom: 14 }}>
+        <div style={{ background: C.greenBg, borderRadius: rad(10), padding: "12px 14px", fontSize: 13.5, marginBottom: 14 }}>
           <strong style={{ color: C.green }}>{notice.title}</strong>
           {notice.detail && (
             <span style={{ marginLeft: 8 }}>
-              Temporary password: <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}` }}>{notice.detail}</code>
+              Temporary password: <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: rad(6), border: `1px solid ${C.line}` }}>{notice.detail}</code>
               {" "}— shown once, hand it over securely and have them change it.
             </span>
           )}
@@ -232,7 +232,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
   };
 
   const smallBtn = {
-    fontSize: 12.5, fontWeight: 600, padding: "7px 12px", borderRadius: 8,
+    fontSize: 12.5, fontWeight: 600, padding: "7px 12px", borderRadius: rad(8),
     border: `1px solid ${C.line}`, background: C.panel, color: C.ink, cursor: "pointer",
   };
   // self edits go through /me (works for any role); others need the admin route
@@ -255,7 +255,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
   };
 
   return (
-    <div style={{ position: "relative", background: C.paper, borderRadius: 12, border: `1px solid ${C.line}`, padding: "14px 16px", opacity: u.active ? 1 : 0.65 }}>
+    <div style={{ position: "relative", background: C.paper, borderRadius: rad(12), border: `1px solid ${C.line}`, padding: "14px 16px", opacity: u.active ? 1 : 0.65 }}>
       {!self && (confirmRemove ? (
         <div style={{ position: "absolute", top: 10, right: 12, fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ color: C.red, fontWeight: 600 }}>Remove?</span>
@@ -282,7 +282,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
         <span style={{ color: C.sub, fontWeight: 600 }}>Password</span>
         {u.has_password ? (
           <>
-            <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: 6, border: `1px solid ${C.line}`, letterSpacing: showPw ? 0 : 2 }}>
+            <code style={{ fontFamily: MONO, fontWeight: 600, background: C.panel, padding: "2px 8px", borderRadius: rad(6), border: `1px solid ${C.line}`, letterSpacing: showPw ? 0 : 2 }}>
               {showPw ? revealed : "••••••••"}
             </code>
             <button onClick={toggleReveal} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>
@@ -309,7 +309,7 @@ function StaffCard({ u, self, onCall, onChanged, onNotice }) {
           title={self ? "You can't block yourself" : u.active ? "Block sign-in" : "Restore access"}
           onClick={async () => { if (await onCall(`/api/users/${u.id}`, "PATCH", { active: !u.active })) onChanged(); }}
           style={{
-            fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: 20, cursor: self ? "default" : "pointer",
+            fontSize: 12, fontWeight: 600, padding: "6px 14px", borderRadius: rad(20), cursor: self ? "default" : "pointer",
             border: "none", background: u.active ? C.greenBg : C.redBg, color: u.active ? C.green : C.red,
           }}
         >
@@ -422,7 +422,7 @@ function TwoFactor({ onCall, onNotice }) {
           <p style={{ fontSize: 13.5, color: C.sub, marginBottom: 10 }}>Add this key to your authenticator app (Google Authenticator, 1Password, Authy), then enter the 6-digit code it shows.</p>
           <div style={{ marginBottom: 12 }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: C.sub }}>Setup key</span>
-            <code style={{ display: "block", fontFamily: MONO, fontSize: 14, fontWeight: 600, background: C.paper, padding: "10px 12px", borderRadius: 8, border: `1px solid ${C.line}`, marginTop: 4, wordBreak: "break-all" }}>{enroll.secret}</code>
+            <code style={{ display: "block", fontFamily: MONO, fontSize: 14, fontWeight: 600, background: C.paper, padding: "10px 12px", borderRadius: rad(8), border: `1px solid ${C.line}`, marginTop: 4, wordBreak: "break-all" }}>{enroll.secret}</code>
           </div>
           <div className="flex" style={{ gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
             <div style={{ flex: "1 1 160px" }}>
@@ -499,7 +499,7 @@ function ChangePassword({ onCall, onDone }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 38 }}>
             {hasPw ? (
               <>
-                <code style={{ fontFamily: MONO, fontWeight: 600, fontSize: 13, background: C.panel, padding: "7px 10px", borderRadius: 8, border: `1px solid ${C.line}`, letterSpacing: showCur ? 0 : 2 }}>
+                <code style={{ fontFamily: MONO, fontWeight: 600, fontSize: 13, background: C.panel, padding: "7px 10px", borderRadius: rad(8), border: `1px solid ${C.line}`, letterSpacing: showCur ? 0 : 2 }}>
                   {showCur ? current : "••••••••"}
                 </code>
                 <button onClick={toggleCur} style={{ background: "none", border: "none", color: C.brand, cursor: "pointer", fontSize: 12.5, fontWeight: 600, padding: 0 }}>

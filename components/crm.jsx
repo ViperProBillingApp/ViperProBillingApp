@@ -925,7 +925,6 @@ export default function CRM({ user }) {
     const replyN = replies.length + unmatched.length;
     const [pageTitle, pageSub] = TAB_META[tab] || TAB_META.digest;
     const navItems = [["digest", "Today"], ["clients", "Clients"], ["workflow", "Workflow"], ["comms", "Emails"], ["replies", "Replies", replyN], ["recovery", "Recovery", bounced.length]];
-    const chaseN = active.filter((c) => needsFollowUp(c)).length;
     return (
       <LookCtx.Provider value={lookValue}>
       <div className="st-root" style={{ minHeight: "100dvh", background: T.pageBg, backgroundAttachment: "fixed", fontFamily: SANS, color: C.ink, padding: "clamp(0px, 1.1vw, 16px)" }}>
@@ -934,10 +933,8 @@ export default function CRM({ user }) {
           <div className="mx-auto w-full" style={{ maxWidth: 1380, padding: "clamp(14px, 2vw, 26px) clamp(14px, 2.6vw, 34px) 30px" }}>
             {/* Top bar: logo + count badge · dark pill navigation · round tools */}
             <header className="st-topbar" style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-              <div className="flex items-center" style={{ gap: 14, flexShrink: 0 }}>
-                <Wordmark size={19} reversed={lookValue.dark} />
-                <span title={`${chaseN} clients need a follow-up`} style={{ width: 42, height: 42, borderRadius: "50%", border: `1px solid ${C.line}`, background: C.panel, boxShadow: T.shCard,
-                  display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 14, fontWeight: 600, color: C.ink }}>{chaseN}</span>
+              <div className="flex items-center" style={{ flexShrink: 0 }}>
+                <Wordmark size={26} reversed={lookValue.dark} />
               </div>
               <nav className="st-nav" aria-label="Main" style={{ display: "flex", alignItems: "center", gap: 2, background: C.brand, borderRadius: 999, padding: 5,
                 margin: "0 auto", flexShrink: 1, minWidth: 0, boxShadow: lookValue.dark ? "0 0 0 1px rgba(255,255,255,0.08)" : "0 14px 30px -18px rgba(22,33,58,0.6)", maxWidth: "100%", overflowX: "auto" }}>

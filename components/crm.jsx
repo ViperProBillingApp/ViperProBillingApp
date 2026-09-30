@@ -958,16 +958,16 @@ export default function CRM({ user }) {
                 })}
               </nav>
               <div className="st-tools flex items-center" style={{ gap: 7, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }}>
-                <IconCircle icon="mail" title="Email templates" onClick={() => setModal("emails")} />
-                <IconCircle icon="pricing" title="Pricing" onClick={() => setModal("pricing")} />
-                <IconCircle icon="portal" title="Viper Customers — portal logins" onClick={() => setModal("viper")} />
-                <IconCircle icon="reports" title="Reports" onClick={() => setModal("reports")} />
-                <IconCircle icon="onboarding" title="Maritz Onboarding" onClick={() => setModal("onboarding")} />
-                {user.role === "admin" && <IconCircle icon="sync" title={sync.busy ? "Syncing ChargeOver…" : "Sync ChargeOver"} onClick={syncNow} active={sync.busy} />}
+                <IconCircle label="Templates" icon="mail" title="Email templates" onClick={() => setModal("emails")} />
+                <IconCircle label="Pricing" icon="pricing" title="Pricing" onClick={() => setModal("pricing")} />
+                <IconCircle label="Viper" icon="portal" title="Viper Customers — portal logins" onClick={() => setModal("viper")} />
+                <IconCircle label="Reports" icon="reports" title="Reports" onClick={() => setModal("reports")} />
+                <IconCircle label="Onboarding" icon="onboarding" title="Maritz Onboarding" onClick={() => setModal("onboarding")} />
+                {user.role === "admin" && <IconCircle label={sync.busy ? "Syncing…" : "Sync"} icon="sync" title={sync.busy ? "Syncing ChargeOver…" : "Sync ChargeOver"} onClick={syncNow} active={sync.busy} />}
                 <span aria-hidden style={{ width: 1, height: 26, background: C.line, margin: "0 4px" }} />
-                <IconCircle icon="bell" title={mailErr ? mailErr : replyN ? `${replyN} client replies waiting` : "No new replies"} onClick={() => setTab("replies")} dot={!!mailErr || replyN > 0} />
+                <IconCircle label="Replies" icon="bell" title={mailErr ? mailErr : replyN ? `${replyN} client replies waiting` : "No new replies"} onClick={() => setTab("replies")} dot={!!mailErr || replyN > 0} />
                 <LookSwitcher look={look} onChange={changeLook} />
-                <IconCircle icon="settings" title="Settings" onClick={() => setModal("settings")} />
+                <IconCircle label="Settings" icon="settings" title="Settings" onClick={() => setModal("settings")} />
                 <UserMenu user={user} onAccount={() => setModal("users")} onLogout={logout} />
               </div>
             </header>
@@ -986,10 +986,10 @@ export default function CRM({ user }) {
               </div>
               <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12, color: saveState === "error" || saveState === "stale" ? C.red : C.faint, minWidth: 52, textAlign: "right" }}>{saveLabel}</span>
-                <IconCircle icon="import" title="Import CSV" onClick={() => setModal("import")} />
-                <IconCircle icon="export" title="Export CSV" onClick={() => exportCsv(active)} />
-                <IconCircle icon="archive" title={`Archived clients${archived.length ? ` (${archived.length})` : ""}`} onClick={() => setModal("archived")} badge={0} />
-                <IconCircle icon="trash" title="Deleted clients" onClick={() => setModal("deleted")} />
+                <IconCircle label="Import" icon="import" title="Import CSV" onClick={() => setModal("import")} />
+                <IconCircle label="Export" icon="export" title="Export CSV" onClick={() => exportCsv(active)} />
+                <IconCircle label="Archived" icon="archive" title={`Archived clients${archived.length ? ` (${archived.length})` : ""}`} onClick={() => setModal("archived")} badge={0} />
+                <IconCircle label="Deleted" icon="trash" title="Deleted clients" onClick={() => setModal("deleted")} />
                 <PillCTA onClick={() => setModal("add")}>Add a client</PillCTA>
               </div>
             </div>
@@ -5464,7 +5464,7 @@ function LookSwitcher({ look, onChange, variant = "circle" }) {
     <>
       {variant === "menu"
         ? <MenuItem icon="look" onClick={open}>{`Look\u00a0· ${info.label}`}</MenuItem>
-        : <IconCircle icon="look" title={`Look: ${info.label} — change`} onClick={open} active={!!menu} />}
+        : <IconCircle label="Look" icon="look" title={`Look: ${info.label} — change`} onClick={open} active={!!menu} />}
       {menu && createPortal(
         <>
           <div onMouseDown={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 130 }} />
@@ -5507,11 +5507,14 @@ function UserMenu({ user, onAccount, onLogout }) {
   const hov = { onMouseEnter: (e) => (e.currentTarget.style.background = C.lineSoft), onMouseLeave: (e) => (e.currentTarget.style.background = "transparent") };
   return (
     <>
+      <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 1, flexShrink: 0 }}>
       <button type="button" onClick={open} title={user.name || user.email} aria-label="Account menu"
         style={{ width: 44, height: 44, borderRadius: "50%", border: `2px solid ${C.panel}`, cursor: "pointer", flexShrink: 0, padding: 0,
           background: C.hero, color: "#fff", fontSize: 14, fontWeight: 700, boxShadow: `0 0 0 1px ${C.line}, ${T.shCard}`, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
         {initialsOf(user.name || user.email)}
       </button>
+      <span aria-hidden onClick={open} style={{ fontSize: 10.5, fontWeight: 600, lineHeight: 1, whiteSpace: "nowrap", cursor: "pointer", color: C.action }}>Account</span>
+      </span>
       {menu && createPortal(
         <>
           <div onMouseDown={() => setMenu(null)} style={{ position: "fixed", inset: 0, zIndex: 130 }} />
@@ -5532,8 +5535,9 @@ function UserMenu({ user, onAccount, onLogout }) {
 
 // Round white icon button (Studio top bar + page header). `dot` shows an
 // alert dot; `badge` a small count.
-function IconCircle({ icon, title, onClick, dot, badge, active, size = 40, dark }) {
-  return (
+// `label` adds a small caption underneath (top bar + page header tools).
+function IconCircle({ icon, title, onClick, dot, badge, active, size = 40, dark, label }) {
+  const btn = (
     <button type="button" onClick={onClick} title={title} aria-label={title}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = dark ? "rgba(255,255,255,0.14)" : C.lineSoft; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = dark ? "rgba(255,255,255,0.06)" : C.panel; }}
@@ -5545,6 +5549,13 @@ function IconCircle({ icon, title, onClick, dot, badge, active, size = 40, dark 
       {dot && <span aria-hidden style={{ position: "absolute", top: size * 0.2, right: size * 0.22, width: 8, height: 8, borderRadius: "50%", background: C.red, boxShadow: `0 0 0 2px ${C.panel}` }} />}
       {badge > 0 && <span aria-hidden style={{ position: "absolute", top: -3, right: -3, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: C.red, color: "#fff", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 0 2px ${C.paper}` }}>{badge > 99 ? "99+" : badge}</span>}
     </button>
+  );
+  if (!label) return btn;
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: 5, flexShrink: 0, minWidth: size }}>
+      {btn}
+      <span aria-hidden onClick={onClick} style={{ fontSize: 10.5, fontWeight: 600, lineHeight: 1, whiteSpace: "nowrap", cursor: "pointer", color: dark ? "rgba(255,255,255,0.8)" : C.action }}>{label}</span>
+    </span>
   );
 }
 
